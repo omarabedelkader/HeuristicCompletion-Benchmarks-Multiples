@@ -170,7 +170,7 @@ CooBenchRunnerMessage class >> runComparisonForPackages: aCol [
 				  package: pack;
 				  baseline: #completeBaseline ;
 				  others:
-					  {#complete2LevelDependency. #completeBaseline. #completeDependency. #completeLateralPackage. #completeReverseDependency. #completeSemantics. #local2LevelDependency. #localDependency. #localLateralPackage. #localReverseDependency. #unit2LevelDependency. #unitDependency. #unitEmpty. #unitLateral. #unitPackage. #unitReverseDependency };
+					  { #completeBaseline. #completeDependency. };
 				  run ]
 ]
 
@@ -243,35 +243,6 @@ CooBenchRunnerMessage class >> specTests [
 ]
 
 { #category : 'COMPLETE' }
-CooBenchRunnerMessage >> complete2LevelDependency [
-	"self new 
-        package: CompletionSorter package;
-        complete2LevelDependency"
-
-	| builder benchmark |
-	builder := CoASTHeuristicsResultSetBuilder new.
-	builder messageHeuristic: (builder newHeuristicBuilder
-			add: CoSelfMessageHeuristic new;
-			 add: CoSuperMessageHeuristic new;
-			 add: CoTypedReceiverMessageHeuristic new;
-			 add: CoInitializeInferencedMessageHeuristic new;
-			 add: CoLiteralMessageHeuristic new;
-			 add: CoGlobalVariableMessageHeuristic new;
-			 add: CoVariableWithTypeNameMessageHeuristic new;
-			 add: (CooUnknownMessageHeuristic new globalMessageFetcherClass: CoLocal2LevelDependencyPackageSelectorFetcher);
-			 add: CoUnknownMessageHeuristic new;
-			 build).
-
-	benchmark := CooStaticBenchmarksMessage new
-		             name: '2 Level message Dependency Package Scope';
-		             scope: (CoBenchmarkPackage on: package);
-		             builder: builder;
-		             run.
-
-	^ benchmark
-]
-
-{ #category : 'COMPLETE' }
 CooBenchRunnerMessage >> completeBaseline [
 	"self new 
 		package: CompletionSorter package;
@@ -279,11 +250,11 @@ CooBenchRunnerMessage >> completeBaseline [
 
 	| builder benchmark |
 	builder := CoASTHeuristicsResultSetBuilder new.
-	builder messageHeuristic: (builder newHeuristicBuilder
+	builder messagesHeuristic: (builder newHeuristicBuilder
 			 add: CoUnknownMessageHeuristic new;
 			 build).
 	benchmark := CooStaticBenchmarksMessage new
-		             name: 'Complete Message Baseline';
+		             name: 'Baseline';
 		             scope: (CoBenchmarkPackage on: package);
 		             builder: builder;
 		             run.
@@ -298,7 +269,7 @@ CooBenchRunnerMessage >> completeDependency [
 
 	| builder benchmark |
 	builder := CoASTHeuristicsResultSetBuilder new.
-	builder messageHeuristic: (builder newHeuristicBuilder
+	builder messagesHeuristic: (builder newHeuristicBuilder
 			 add: CoSelfMessageHeuristic new;
 			 add: CoSuperMessageHeuristic new;
 			 add: CoTypedReceiverMessageHeuristic new;
@@ -306,225 +277,14 @@ CooBenchRunnerMessage >> completeDependency [
 			 add: CoLiteralMessageHeuristic new;
 			 add: CoGlobalVariableMessageHeuristic new;
 			 add: CoVariableWithTypeNameMessageHeuristic new;
-			 add: (CooUnknownMessageHeuristic new globalMessageFetcherClass: CoLocalDependencyPackageSelectorFetcher);
-			 add: CoUnknownMessageHeuristic new ;
-			 build).
-	benchmark := CooStaticBenchmarksMessage new
-		             name: 'Complete Dependency Message Semantics';
-		             scope: (CoBenchmarkPackage on: package);
-		             builder: builder;
-		             run.
-	^ benchmark
-]
-
-{ #category : 'COMPLETE' }
-CooBenchRunnerMessage >> completeLateralPackage [
-	"self new 
-		package: NECEntry package;
-		completeLateralPackage"
-
-	| builder benchmark |
-	builder := CoASTHeuristicsResultSetBuilder new.
-	builder messageHeuristic: (builder newHeuristicBuilder
-			 add: CoSelfMessageHeuristic new;
-			 add: CoSuperMessageHeuristic new;
-			 add: CoTypedReceiverMessageHeuristic new;
-			 add: CoInitializeInferencedMessageHeuristic new;
-			 add: CoLiteralMessageHeuristic new;
-			 add: CoGlobalVariableMessageHeuristic new;
-			 add: CoVariableWithTypeNameMessageHeuristic new;
-			 add: (CooUnknownMessageHeuristic new globalMessageFetcherClass: CoLocalLateralPackageSelectorFetcher);
-			 add: CoUnknownMessageHeuristic new ;
-			 build).
-	benchmark := CooStaticBenchmarksMessage new
-		             name: 'Complete Lateral Message';
-		             scope: (CoBenchmarkPackage on: package);
-		             builder: builder;
-		             run.
-	^ benchmark
-]
-
-{ #category : 'COMPLETE' }
-CooBenchRunnerMessage >> completeReverseDependency [
-	"self new 
-        package: CompletionSorter package;
-        completeReverseDependency"
-
-	| builder benchmark |
-	builder := CoASTHeuristicsResultSetBuilder new.
-	builder messageHeuristic: (builder newHeuristicBuilder
-			 add: CoSelfMessageHeuristic new;
-			 add: CoSuperMessageHeuristic new;
-			 add: CoTypedReceiverMessageHeuristic new;
-			 add: CoInitializeInferencedMessageHeuristic new;
-			 add: CoLiteralMessageHeuristic new;
-			 add: CoGlobalVariableMessageHeuristic new;
-			 add: CoVariableWithTypeNameMessageHeuristic new;
-			 add: (CooUnknownMessageHeuristic new globalMessageFetcherClass: CoLocalReverseDependencyPackageSelectorFetcher);
+			 add: CoDependencyMessageHeuristics new;
 			 add: CoUnknownMessageHeuristic new;
 			 build).
-
 	benchmark := CooStaticBenchmarksMessage new
-		             name: 'Complete Reverse Message';
+		             name: 'Dependency';
 		             scope: (CoBenchmarkPackage on: package);
 		             builder: builder;
 		             run.
-
-	^ benchmark
-]
-
-{ #category : 'COMPLETE' }
-CooBenchRunnerMessage >> completeSemantics [
-	"self new 
-		package: NECEntry package;
-		completeSemantics"
-
-	| builder benchmark |
-	builder := CoASTHeuristicsResultSetBuilder new.
-	builder messageHeuristic: (builder newHeuristicBuilder
-			 add: CoSelfMessageHeuristic new;
-			 add: CoSuperMessageHeuristic new;
-			 add: CoTypedReceiverMessageHeuristic new;
-			 add: CoInitializeInferencedMessageHeuristic new;
-			 add: CoLiteralMessageHeuristic new;
-			 add: CoGlobalVariableMessageHeuristic new;
-			 add: CoVariableWithTypeNameMessageHeuristic new;
-			 add: CoUnknownMessageHeuristic new ;
-			 build).
-	benchmark := CooStaticBenchmarksMessage new
-		             name: 'Complete Message Semantics';
-		             scope: (CoBenchmarkPackage on: package);
-		             builder: builder;
-		             run.
-	^ benchmark
-]
-
-{ #category : 'LOCAL' }
-CooBenchRunnerMessage >> local2LevelDependency [
-	"self new 
-        package: CompletionSorter package;
-        local2LevelDependency"
-
-	| builder benchmark |
-	builder := CoASTHeuristicsResultSetBuilder new.
-	builder messageHeuristic: (builder newHeuristicBuilder
-			 add: (CooUnknownMessageHeuristic new globalMessageFetcherClass: CoLocal2LevelDependencyPackageSelectorFetcher);
-			 build).
-
-	benchmark := CooStaticBenchmarksMessage new
-		             name: 'Local 2 Level message Dependency Package Scope';
-		             scope: (CoBenchmarkPackage on: package);
-		             builder: builder;
-		             run.
-
-	^ benchmark
-]
-
-{ #category : 'LOCAL' }
-CooBenchRunnerMessage >> localDependency [
-	"self new 
-        package: CompletionSorter package;
-        localDependency"
-
-	| builder benchmark |
-	builder := CoASTHeuristicsResultSetBuilder new.
-	builder messageHeuristic: (builder newHeuristicBuilder
-			 add: (CooUnknownMessageHeuristic new globalMessageFetcherClass:
-						  CoLocalDependencyPackageSelectorFetcher);
-			 build).
-
-	benchmark := CooStaticBenchmarksMessage new
-		             name: 'Local Direct Message Dependency Package';
-		             scope: (CoBenchmarkPackage on: package);
-		             builder: builder;
-		             run.
-
-	^ benchmark
-]
-
-{ #category : 'LOCAL' }
-CooBenchRunnerMessage >> localLateralPackage [ 
-    "self new 
-        package: CompletionSorter package;
-        localLateralPackageWithLocalPackage"
-
-    | builder benchmark |
-    builder := CoASTHeuristicsResultSetBuilder new.
-    builder messageHeuristic: (builder newHeuristicBuilder
-        add: (CooUnknownMessageHeuristic new
-                globalMessageFetcherClass: CoLocalLateralPackageSelectorFetcher);
-        build).
-
-    benchmark := CooStaticBenchmarksMessage new
-        name: 'Local lateral Package';
-        scope: (CoBenchmarkPackage on: package);
-        builder: builder;
-        run.
-
-    ^ benchmark
-]
-
-{ #category : 'LOCAL' }
-CooBenchRunnerMessage >> localReverseDependency [ 
-	"self new 
-        package: CompletionSorter package;
-        localReverseDependency"
-
-	| builder benchmark |
-	builder := CoASTHeuristicsResultSetBuilder new.
-	builder messageHeuristic: (builder newHeuristicBuilder
-			 add: (CooUnknownMessageHeuristic new globalMessageFetcherClass:
-						  CoLocalReverseDependencyPackageSelectorFetcher);
-			 build).
-
-	benchmark := CooStaticBenchmarksMessage new
-		             name: 'Local reverse package';
-		             scope: (CoBenchmarkPackage on: package);
-		             builder: builder;
-		             run.
-
-	^ benchmark
-]
-
-{ #category : 'UNIT' }
-CooBenchRunnerMessage >> unit2LevelDependency [
-	"self new 
-        package: CompletionSorter package;
-        unit2LevelDependency"
-
-	| builder benchmark |
-	builder := CoASTHeuristicsResultSetBuilder new.
-	builder messageHeuristic: (builder newHeuristicBuilder
-			 add: (CooUnknownMessageHeuristic new globalMessageFetcherClass: CoUnit2LevelDependencyPackageSelectorFetcher);
-			 build).
-
-	benchmark := CooStaticBenchmarksMessage new
-		             name: 'Unit 2 Level message Dependency Package Scope';
-		             scope: (CoBenchmarkPackage on: package);
-		             builder: builder;
-		             run.
-
-	^ benchmark
-]
-
-{ #category : 'UNIT' }
-CooBenchRunnerMessage >> unitDependency [
-	"self new 
-        package: CompletionSorter package;
-        unitDependency"
-
-	| builder benchmark |
-	builder := CoASTHeuristicsResultSetBuilder new.
-	builder messageHeuristic: (builder newHeuristicBuilder
-			 add: (CooUnknownMessageHeuristic new globalMessageFetcherClass: CoUnitDependencyPackageSelectorFetcher);
-			 build).
-
-	benchmark := CooStaticBenchmarksMessage new
-		             name: 'Unit Direct Message Dependency Package';
-		             scope: (CoBenchmarkPackage on: package);
-		             builder: builder;
-		             run.
-
 	^ benchmark
 ]
 
@@ -541,124 +301,6 @@ CooBenchRunnerMessage >> unitEmpty [
 			 build).
 	benchmark := CooStaticBenchmarksMessage new
 		             name: 'Unit Empty Heuristic';
-		             scope: (CoBenchmarkPackage on: package);
-		             builder: builder;
-		             run.
-	^ benchmark
-]
-
-{ #category : 'UNIT' }
-CooBenchRunnerMessage >> unitLateral [
-	"self new 
-		package: NECEntry package;
-		unitLateralsWithoutLocalPackage"
-
-	"self new 
-		package: (PackageOrganizer default packageNamed: 'Microdown') ;
-		unitLateralsWithoutLocalPackage"
-
-	| builder benchmark |
-	builder := CoASTHeuristicsResultSetBuilder new.
-	builder messageHeuristic: (builder newHeuristicBuilder
-			 add: (CooUnknownMessageHeuristic new globalMessageFetcherClass: CoUnitLateralPackageSelectorFetcher);
-			 build).
-	benchmark := CooStaticBenchmarksMessage new
-		             name: 'Unit Lateral Packages Without Local Package';
-		             scope: (CoBenchmarkPackage on: package);
-		             builder: builder;
-		             run.
-	^ benchmark
-]
-
-{ #category : 'UNIT' }
-CooBenchRunnerMessage >> unitPackage [
-	"self new 
-		package: NECEntry package;
-		unitPackage"
-
-	"self new 
-		package: (PackageOrganizer default packageNamed: 'Microdown') ;
-		unitPackage"
-
-	| builder benchmark |
-	builder := CoASTHeuristicsResultSetBuilder new.
-	builder messageHeuristic: (builder newHeuristicBuilder
-			 add: (CooUnknownMessageHeuristic new globalMessageFetcherClass: CoUnitPackageSelectorFetcher);
-			 build).
-	benchmark := CooStaticBenchmarksMessage new
-		             name: 'Unit Lateral Packages Without Local Package';
-		             scope: (CoBenchmarkPackage on: package);
-		             builder: builder;
-		             run.
-	^ benchmark
-]
-
-{ #category : 'UNIT' }
-CooBenchRunnerMessage >> unitReverseDependency [
-	"self new 
-		package: (PackageOrganizer default packageNamed: 'NECompletion') ;
-		unitReverseDependencyWithoutLocalPackage"
-
-	"self new 
-		package: (PackageOrganizer default packageNamed: 'Microdown') ;
-		unitReverseDependencyWithoutLocalPackage"
-
-	| builder benchmark |
-	builder := CoASTHeuristicsResultSetBuilder new.
-	builder messageHeuristic: (builder newHeuristicBuilder
-			 add: (CooUnknownMessageHeuristic new globalMessageFetcherClass: CoUnitReverseDependencyPackageSelectorFetcher);
-			 build).
-	benchmark := CooStaticBenchmarksMessage new
-		             name: 'Unit Reverse Dependency without Local Package';
-		             scope: (CoBenchmarkPackage on: package);
-		             builder: builder;
-		             run.
-	^ benchmark
-]
-
-{ #category : 'experience' }
-CooBenchRunnerMessage >> withLateralDependency [ 
-	"self new 
-        package: CompletionSorter package;
-        withLateralDependency"
-
-	| builder benchmark |
-	builder := CoASTHeuristicsResultSetBuilder new.
-	builder messageHeuristic: (builder newHeuristicBuilder
-			 add: (CooUnknownMessageHeuristic new globalMessageFetcherClass:
-						  CoUnitLateralPackageSelectorFetcher);
-			 build).
-
-	benchmark := CooStaticBenchmarksMessage new
-		             name: 'Package Scope';
-		             scope: (CoBenchmarkPackage on: package);
-		             builder: builder;
-		             run.
-
-	^ benchmark
-]
-
-{ #category : 'experience' }
-CooBenchRunnerMessage >> withSemanticsPlusPackageScope [
-	"self new 
-		package: AnalyserData1 package;
-		withSemanticsPlusPackageScope"
-
-	| builder benchmark |
-	builder := CoASTHeuristicsResultSetBuilder new.
-	builder messageHeuristic: (builder newHeuristicBuilder
-			 add: CoSelfMessageHeuristic new;
-			 add: CoSuperMessageHeuristic new;
-			 add: CoTypedReceiverMessageHeuristic new;
-			 add: CoInitializeInferencedMessageHeuristic new;
-			 add: CoLiteralMessageHeuristic new;
-			 add: CoGlobalVariableMessageHeuristic new;
-			 add: CoVariableWithTypeNameMessageHeuristic new;
-			add: (CooUnknownMessageHeuristic new globalMessageFetcherClass:
-						  CoLocalLateralPackageSelectorFetcher);
-			 build).
-	benchmark := CooStaticBenchmarksMessage new
-		             name: '';
 		             scope: (CoBenchmarkPackage on: package);
 		             builder: builder;
 		             run.
