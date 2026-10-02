@@ -168,9 +168,8 @@ CooBenchRunnerMessage class >> runComparisonForPackages: aCol [
 	^ aCol collect: [ :pack |
 			  self new
 				  package: pack;
-				  baseline: #completeBaseline ;
-				  others:
-					  { #completeBaseline. #completeDependency. };
+				  baseline: #completeBaseline;
+				  others: { #completeDependency };
 				  run ]
 ]
 
