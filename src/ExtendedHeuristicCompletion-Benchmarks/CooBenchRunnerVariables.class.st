@@ -232,9 +232,9 @@ CooBenchRunnerVariables class >> runComparisonForPackages: aCol [
 	^ aCol collect: [ :pack |
 			  self new
 				  package: pack;
-				  baseline: #completeBaseline;
+				  baseline: #heuristicsBaseline;
 				  others:
-					  { #completeDependency.};
+					  { #heuristicsDependency.};
 				  run ]
 ]
 
@@ -348,8 +348,8 @@ CooBenchRunnerVariables class >> specTests [
 		   'Spec2-Tests'}) inspect
 ]
 
-{ #category : 'COMPLETE' }
-CooBenchRunnerVariables >> completeBaseline [
+{ #category : 'Heuristics' }
+CooBenchRunnerVariables >> heuristicsBaseline [
 
 	| builder benchmark |
 	builder := CoASTHeuristicsResultSetBuilder new.
@@ -364,8 +364,8 @@ CooBenchRunnerVariables >> completeBaseline [
 	^ benchmark
 ]
 
-{ #category : 'COMPLETE' }
-CooBenchRunnerVariables >> completeDependency [
+{ #category : 'Heuristics' }
+CooBenchRunnerVariables >> heuristicsDependency [
 
 	| builder benchmark |
 	builder := CoASTHeuristicsResultSetBuilder new.

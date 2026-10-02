@@ -168,8 +168,8 @@ CooBenchRunnerMessage class >> runComparisonForPackages: aCol [
 	^ aCol collect: [ :pack |
 			  self new
 				  package: pack;
-				  baseline: #completeBaseline;
-				  others: { #completeDependency };
+				  baseline: #heuristicsBaseline;
+				  others: { #heuristicsDependency };
 				  run ]
 ]
 
@@ -241,11 +241,8 @@ CooBenchRunnerMessage class >> specTests [
 		   'Spec2-Morphic-Tests'. 'Spec2-Tests' }) inspect
 ]
 
-{ #category : 'COMPLETE' }
-CooBenchRunnerMessage >> completeBaseline [
-	"self new 
-		package: CompletionSorter package;
-		completeBaseline"
+{ #category : 'Heuristics' }
+CooBenchRunnerMessage >> heuristicsBaseline [
 
 	| builder benchmark |
 	builder := CoASTHeuristicsResultSetBuilder new.
@@ -260,8 +257,8 @@ CooBenchRunnerMessage >> completeBaseline [
 	^ benchmark
 ]
 
-{ #category : 'COMPLETE' }
-CooBenchRunnerMessage >> completeDependency [
+{ #category : 'Heuristics' }
+CooBenchRunnerMessage >> heuristicsDependency [
 
 	| builder benchmark |
 	builder := CoASTHeuristicsResultSetBuilder new.
