@@ -263,9 +263,6 @@ CooBenchRunnerMessage >> completeBaseline [
 
 { #category : 'COMPLETE' }
 CooBenchRunnerMessage >> completeDependency [
-	"self new 
-		package: NECEntry package;
-		completeDependency"
 
 	| builder benchmark |
 	builder := CoASTHeuristicsResultSetBuilder new.
@@ -282,25 +279,6 @@ CooBenchRunnerMessage >> completeDependency [
 			 build).
 	benchmark := CooStaticBenchmarksMessage new
 		             name: 'Dependency';
-		             scope: (CoBenchmarkPackage on: package);
-		             builder: builder;
-		             run.
-	^ benchmark
-]
-
-{ #category : 'UNIT' }
-CooBenchRunnerMessage >> unitEmpty [
-	"self new 
-		package: NECEntry package;
-		unitEmptyHeuristic"
-
-	| builder benchmark |
-	builder := CoASTHeuristicsResultSetBuilder new.
-	builder messageHeuristic: (builder newHeuristicBuilder
-			 add: CoNullFetcherHeuristic new;
-			 build).
-	benchmark := CooStaticBenchmarksMessage new
-		             name: 'Unit Empty Heuristic';
 		             scope: (CoBenchmarkPackage on: package);
 		             builder: builder;
 		             run.
