@@ -169,8 +169,13 @@ CooBenchRunnerMessage class >> runComparisonForPackages: aCol [
 			  self new
 				  package: pack;
 				  baseline: #heuristicsBaseline;
-				  others: { #heuristicsDependency };
+				  others: { #heuristicsDependency. #llmCompletion };
 				  run ]
+]
+
+{ #category : 'LLM' }
+CooBenchRunnerMessage >> llmCompletion [
+	^ self llmCompletionFor: #messages
 ]
 
 { #category : 'examples' }

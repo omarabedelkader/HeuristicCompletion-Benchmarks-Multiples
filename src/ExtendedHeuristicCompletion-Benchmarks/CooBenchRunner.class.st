@@ -30,6 +30,27 @@ CooBenchRunner class >> allResultsFor: aColOfPackageNames [
 		  latex }
 ]
 
+{ #category : 'examples' }
+CooBenchRunner class >> necTests [
+	"Both completion kinds, each containing the original strategies and the LLM.
+	Keep the answer to inspect or export without running the model again."
+	^ self compareMessagesAndVariablesFor: { 'NECompletion-Tests' }
+]
+
+{ #category : 'benchmarks' }
+CooBenchRunner class >> compareMessagesAndVariablesFor: packageNames [
+	^ Dictionary new
+		at: #messages put: (CooBenchRunnerMessage allResultsFor: packageNames);
+		at: #variables put: (CooBenchRunnerVariables allResultsFor: packageNames);
+		yourself
+]
+
+{ #category : 'exporting' }
+CooBenchRunner class >> export: comparison to: directory [
+	"Export previously computed results; no new inference requests."
+	^ CooBenchmarkChart export: comparison to: directory
+]
+
 { #category : 'benchmarks' }
 CooBenchRunner class >> latexTableResultForABenchCollection: aCol [
 	"Produce a LaTeX table showing the results from each benchmark in aCol."
@@ -173,6 +194,18 @@ CooBenchRunner >> package: aPackage [
 CooBenchRunner >> results [
 
 	^ results
+]
+
+{ #category : 'LLM' }
+CooBenchRunner >> llmCompletionFor: kind [
+	| benchmark |
+	benchmark := CooLLMBenchmarks new
+		kind: kind;
+		scope: (CoBenchmarkPackage on: package);
+		yourself.
+	"Retain partial diagnostics if an HTTP/server error interrupts this run."
+	results ifNotNil: [ results at: #llmCompletion put: benchmark ].
+	^ benchmark run; yourself
 ]
 
 { #category : 'accessing' }

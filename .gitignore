@@ -33,3 +33,7 @@ github-*.zip
 
 # MAC OS X
 .DS_Store
+
+# Generated benchmark reports (regenerate from retained runs)
+/benchmark-results/
+/benchmark-smoke-results/

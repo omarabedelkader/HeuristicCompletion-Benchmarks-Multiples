@@ -12,7 +12,9 @@ BaselineOfExtendedHeuristicCompletionBenchmarks >> baseline: spec [
 	spec for: #common do: [
 			spec package: 'ExtendedHeuristicCompletion-Benchmarks'.
 
-			"spec
+			spec
 				package: 'ExtendedHeuristicCompletion-Benchmarks-Tests'
-				with: [ spec requires: #( 'ExtendedHeuristicCompletion-Benchmarks' ) ]" ]
+				with: [ spec requires: #( 'ExtendedHeuristicCompletion-Benchmarks' ) ].
+			spec group: 'default' with: #( 'ExtendedHeuristicCompletion-Benchmarks' ).
+			spec group: 'Tests' with: #( 'ExtendedHeuristicCompletion-Benchmarks-Tests' ) ]
 ]

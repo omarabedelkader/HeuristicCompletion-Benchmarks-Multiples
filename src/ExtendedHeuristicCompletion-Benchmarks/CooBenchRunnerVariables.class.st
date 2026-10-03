@@ -234,8 +234,13 @@ CooBenchRunnerVariables class >> runComparisonForPackages: aCol [
 				  package: pack;
 				  baseline: #heuristicsBaseline;
 				  others:
-					  { #heuristicsDependency.};
+					  { #heuristicsDependency. #llmCompletion };
 				  run ]
+]
+
+{ #category : 'LLM' }
+CooBenchRunnerVariables >> llmCompletion [
+	^ self llmCompletionFor: #variables
 ]
 
 { #category : 'examples' }
