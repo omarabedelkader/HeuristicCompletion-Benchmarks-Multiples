@@ -32,9 +32,10 @@ CooBenchmarkChart class >> export: comparison to: directory [
 		(folder / (kind asString , '.tex')) writeStreamDo: [ :out |
 			out truncate; nextPutAll: result third ].
 		runs withIndexDo: [ :run :index |
-			(run results at: #llmCompletion ifAbsent: [ nil ]) ifNotNil: [ :llm |
-				files add: (llm exportRecordsTo:
-					(folder / (kind asString , '-' , index asString , '-llm.jsonl'))) ] ] ].
+			{ #llmCompletion -> 'llm'. #hybridCompletion -> 'hybrid' } do: [ :strategy |
+				(run results at: strategy key ifAbsent: [ nil ]) ifNotNil: [ :llm |
+					files add: (llm exportRecordsTo:
+						(folder / (kind asString , '-' , index asString , '-' , strategy value , '.jsonl'))) ] ] ] ].
 	^ files
 ]
 
@@ -44,7 +45,7 @@ CooBenchmarkChart class >> strategiesFor: runs [
 	keys := Set new.
 	runs do: [ :run | keys addAll: run results keys ].
 	ordered := OrderedCollection new.
-	#(heuristicsBaseline heuristicsDependency llmCompletion) do: [ :key |
+	#(heuristicsBaseline heuristicsDependency llmCompletion hybridCompletion) do: [ :key |
 		(keys includes: key) ifTrue: [ ordered add: key. keys remove: key ] ].
 	ordered addAll: keys asSortedCollection.
 	^ ordered
@@ -69,7 +70,8 @@ CooBenchmarkChart class >> labelFor: strategy [
 	^ (Dictionary newFrom: {
 		#heuristicsBaseline -> 'Baseline'.
 		#heuristicsDependency -> 'Dependency'.
-		#llmCompletion -> 'LLM (1 model token)' })
+		#llmCompletion -> 'LLM (1 model token)'.
+		#hybridCompletion -> 'Hybrid (heuristics + LLM)' })
 		at: strategy ifAbsent: [ strategy asString ]
 ]
 

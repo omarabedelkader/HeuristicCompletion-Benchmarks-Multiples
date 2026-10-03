@@ -15,5 +15,5 @@ result errors do: [ :test |
 	Stdio stdout nextPutAll: 'ERROR: ', test printString; lf.
 	[ test debug ] on: Error do: [ :error |
 		Stdio stdout nextPutAll: error description; lf.
-		error signalerContext shortDebugStackOn: Stdio stdout ] ].
+		Stdio stdout nextPutAll: (String streamContents: [ :out | error signalerContext shortDebugStackOn: out ]) ] ].
 result hasPassed ifFalse: [ Smalltalk exit: 1 ].

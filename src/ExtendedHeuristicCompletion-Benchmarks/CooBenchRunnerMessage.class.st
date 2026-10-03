@@ -169,7 +169,7 @@ CooBenchRunnerMessage class >> runComparisonForPackages: aCol [
 			  self new
 				  package: pack;
 				  baseline: #heuristicsBaseline;
-				  others: { #heuristicsDependency. #llmCompletion };
+				  others: { #heuristicsDependency. #llmCompletion. #hybridCompletion };
 				  run ]
 ]
 
@@ -250,10 +250,7 @@ CooBenchRunnerMessage class >> specTests [
 CooBenchRunnerMessage >> heuristicsBaseline [
 
 	| builder benchmark |
-	builder := CoASTHeuristicsResultSetBuilder new.
-	builder messagesHeuristic: (builder newHeuristicBuilder
-			 add: CoUnknownMessageHeuristic new;
-			 build).
+	builder := self baselineBuilder.
 	benchmark := CooStaticBenchmarksMessage new
 		             name: 'Baseline';
 		             scope: (CoBenchmarkPackage on: package);
@@ -266,6 +263,28 @@ CooBenchRunnerMessage >> heuristicsBaseline [
 CooBenchRunnerMessage >> heuristicsDependency [
 
 	| builder benchmark |
+	builder := self dependencyBuilder.
+	benchmark := CooStaticBenchmarksMessage new
+		             name: 'Dependency';
+		             scope: (CoBenchmarkPackage on: package);
+		             builder: builder;
+		             run.
+	^ benchmark
+]
+
+{ #category : 'Heuristics' }
+CooBenchRunnerMessage >> baselineBuilder [
+	| builder |
+	builder := CoASTHeuristicsResultSetBuilder new.
+	builder messagesHeuristic: (builder newHeuristicBuilder
+			 add: CoUnknownMessageHeuristic new;
+			 build).
+	^ builder
+]
+
+{ #category : 'Heuristics' }
+CooBenchRunnerMessage >> dependencyBuilder [
+	| builder |
 	builder := CoASTHeuristicsResultSetBuilder new.
 	builder messagesHeuristic: (builder newHeuristicBuilder
 			 add: CoSelfMessageHeuristic new;
@@ -278,10 +297,10 @@ CooBenchRunnerMessage >> heuristicsDependency [
 			 add: CoDependencyMessageHeuristics new;
 			 add: CoUnknownMessageHeuristic new;
 			 build).
-	benchmark := CooStaticBenchmarksMessage new
-		             name: 'Dependency';
-		             scope: (CoBenchmarkPackage on: package);
-		             builder: builder;
-		             run.
-	^ benchmark
+	^ builder
+]
+
+{ #category : 'LLM' }
+CooBenchRunnerMessage >> hybridCompletion [
+	^ self hybridCompletionFor: #messages
 ]
