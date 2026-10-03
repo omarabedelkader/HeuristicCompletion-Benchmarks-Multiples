@@ -71,6 +71,8 @@ Class {
 		'completionBenchs',
 		'builder',
 		'completionTimes',
+		'completionObservations',
+		'timeSamples',
 		'memoryUsages',
 		'name'
 	],
@@ -487,7 +489,9 @@ CooStaticBenchmarks >> initialize [
 	super initialize.
 	completionBenchs := Dictionary new.
 	builder := CoASTHeuristicsResultSetBuilder new.
-	completionTimes := Dictionary new. 
+	completionTimes := Dictionary new.
+	completionObservations := OrderedCollection new.
+	timeSamples := Dictionary new.
 	memoryUsages := Dictionary new.
 	name := 'Baseline'
 ]
@@ -867,6 +871,7 @@ CooStaticBenchmarks >> logMemoryUsageSince: startMemory forPrefixSize: prefixSiz
 CooStaticBenchmarks >> logTime: executionTime forPrefix: prefixSize [
 
     | times |
+    (timeSamples at: prefixSize ifAbsentPut: [ OrderedCollection new ]) add: executionTime.
     times := completionTimes
         at: prefixSize
         ifAbsent: [ #( 0 0 )  ].
@@ -1455,4 +1460,65 @@ CooStaticBenchmarks >> trackCompletionResultsFor: receiver atIndex: completionIn
 	
 	"Track completion accuracy."
 	self subclassResponsibility
+]
+
+{ #category : 'accessing' }
+CooStaticBenchmarks >> modelName [
+	^ 'none'
+]
+
+{ #category : 'accessing' }
+CooStaticBenchmarks >> experiment [
+	^ #ranking
+]
+
+{ #category : 'accessing' }
+CooStaticBenchmarks >> latencyCondition [
+	^ #uncontrolled
+]
+
+{ #category : 'accessing' }
+CooStaticBenchmarks >> observations [
+	^ completionObservations
+]
+
+{ #category : 'accessing' }
+CooStaticBenchmarks >> timeSamplesForPrefix: prefix [
+	^ (timeSamples at: prefix ifAbsent: [ #() ]) copy
+]
+
+{ #category : 'metrics' }
+CooStaticBenchmarks >> medianTimeForPrefix: prefix [
+	| sorted middle |
+	sorted := (self timeSamplesForPrefix: prefix) sorted.
+	sorted ifEmpty: [ ^ nil ].
+	middle := (sorted size + 1) // 2.
+	^ sorted size odd
+		ifTrue: [ sorted at: middle ]
+		ifFalse: [ ((sorted at: middle) + (sorted at: middle + 1)) / 2.0 ]
+]
+
+{ #category : 'metrics' }
+CooStaticBenchmarks >> p95TimeForPrefix: prefix [
+	| sorted |
+	sorted := (self timeSamplesForPrefix: prefix) sorted.
+	^ sorted ifEmpty: [ nil ] ifNotEmpty: [ sorted at: (sorted size * 0.95) ceiling ]
+]
+
+{ #category : 'metrics' }
+CooStaticBenchmarks >> recordCompletion: target prefix: prefix rank: rank elapsed: elapsed [
+	completionObservations add: (Dictionary newFrom: {
+		#model -> self modelName. #experiment -> self experiment.
+		#latencyCondition -> self latencyCondition. #prefix -> prefix.
+		#expected -> target asString. #rank -> rank. #wallTimeMs -> elapsed })
+]
+
+{ #category : 'exporting' }
+CooStaticBenchmarks >> exportRecordsTo: aPath [
+	| file |
+	file := aPath asFileReference.
+	file writeStreamDo: [ :out |
+		out truncate.
+		self observations do: [ :record | out nextPutAll: (STONJSON toString: record); lf ] ].
+	^ file
 ]

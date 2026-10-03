@@ -44,8 +44,10 @@ CooHybridLLMBenchmarks >> heuristics: namedBenchmarks [
 
 { #category : 'benchmarks' }
 CooHybridLLMBenchmarks >> enrichSnapshot: snapshot for: node [
-	| candidates |
+	| candidates start |
+	start := self startTimeMeasurement.
 	candidates := self candidatesFor: node prefix: (snapshot at: #prefix).
+	snapshot at: #heuristicMs put: self startTimeMeasurement - start.
 	snapshot at: #contextPolicy put: 'prefix-only-structural-with-heuristics-v1';
 		at: #heuristicSources put: (heuristics collect: [ :source | source key asString ]) asArray;
 		at: #heuristicCandidates put: candidates;
@@ -116,4 +118,10 @@ CooHybridLLMBenchmarks >> contextForCandidates: candidates [
 				separatedBy: [ out nextPutAll: ', ' ].
 			out nextPutAll: ']'; lf ].
 		out nextPutAll: 'Continue the unfinished name at the cursor."'; lf ]
+]
+
+{ #category : 'accessing' }
+CooHybridLLMBenchmarks >> completionLevel [
+	super completionLevel.
+	name := 'Hybrid (complete name)'
 ]

@@ -37,3 +37,7 @@ github-*.zip
 # Generated benchmark reports (regenerate from retained runs)
 /benchmark-results/
 /benchmark-smoke-results/
+
+# Local plot environment and Python bytecode
+/.venv-plots/
+__pycache__/

@@ -100,8 +100,8 @@ CooStaticBenchmarksMessage >> benchCallsite: aMessageNode atPosition: aPosition 
 	| originalSelector |
 	originalSelector := aMessageNode selectorNode value.
 
-	2 to: (self maxPrefixSizeFor: originalSelector) do: [ :index |
-		| prefix startTime startMemory completion candidates completionIndex |
+	[ 2 to: (self maxPrefixSizeFor: originalSelector) do: [ :index |
+		| prefix startTime startMemory completion candidates completionIndex elapsed |
 		startTime := self startTimeMeasurement.
 		startMemory := self startMemoryMeasurement.
 		
@@ -115,6 +115,7 @@ CooStaticBenchmarksMessage >> benchCallsite: aMessageNode atPosition: aPosition 
 		candidates := self
 			              fetchTopCandidatesFrom: completion
 			              usingPrefix: prefix.
+		elapsed := self startTimeMeasurement - startTime.
 		completionIndex := self
 			                   findCompletionIndexFor: originalSelector
 			                   inCandidates: candidates.
@@ -125,9 +126,10 @@ CooStaticBenchmarksMessage >> benchCallsite: aMessageNode atPosition: aPosition 
 			withPrefix: prefix.
 
 		self logMemoryUsageSince: startMemory forPrefixSize: prefix size.
-		self logExecutionTimeSince: startTime forPrefixSize: prefix size ].
+		self logTime: elapsed forPrefix: prefix size.
+		self recordCompletion: originalSelector prefix: prefix rank: completionIndex elapsed: elapsed ].
 
-	aMessageNode selectorNode value: originalSelector
+	] ensure: [ aMessageNode selectorNode value: originalSelector ]
 ]
 
 { #category : 'benchmarks' }
@@ -165,10 +167,10 @@ CooStaticBenchmarksMessage >> findCompletionIndexFor: originalSelector inCandida
 
 { #category : 'benchmarks' }
 CooStaticBenchmarksMessage >> logExecutionTimeSince: startTime forPrefixSize: prefixSize [
-
-	| executionTime |
-	executionTime := Time millisecondClockValue - startTime.
-	self logTime: executionTime forPrefix: prefixSize
+	| elapsed |
+	elapsed := self startTimeMeasurement - startTime.
+	self logTime: elapsed forPrefix: prefixSize.
+	^ elapsed
 ]
 
 { #category : 'benchmarks' }
@@ -202,8 +204,7 @@ CooStaticBenchmarksMessage >> startMemoryMeasurement [
 
 { #category : 'benchmarks' }
 CooStaticBenchmarksMessage >> startTimeMeasurement [
-
-	^ Time millisecondClockValue
+	^ Time microsecondClockValue / 1000.0
 ]
 
 { #category : 'benchmarks' }

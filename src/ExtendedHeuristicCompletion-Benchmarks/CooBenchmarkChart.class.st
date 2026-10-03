@@ -32,7 +32,9 @@ CooBenchmarkChart class >> export: comparison to: directory [
 		(folder / (kind asString , '.tex')) writeStreamDo: [ :out |
 			out truncate; nextPutAll: result third ].
 		runs withIndexDo: [ :run :index |
-			{ #llmCompletion -> 'llm'. #hybridCompletion -> 'hybrid' } do: [ :strategy |
+			(self strategiesFor: { run }) do: [ :key |
+				| strategy |
+				strategy := key -> ((Dictionary newFrom: { #llmCompletion -> 'llm'. #hybridCompletion -> 'hybrid' }) at: key ifAbsent: [ key asString ]).
 				(run results at: strategy key ifAbsent: [ nil ]) ifNotNil: [ :llm |
 					files add: (llm exportRecordsTo:
 						(folder / (kind asString , '-' , index asString , '-' , strategy value , '.jsonl'))) ] ] ] ].
@@ -45,7 +47,7 @@ CooBenchmarkChart class >> strategiesFor: runs [
 	keys := Set new.
 	runs do: [ :run | keys addAll: run results keys ].
 	ordered := OrderedCollection new.
-	#(heuristicsBaseline heuristicsDependency llmCompletion hybridCompletion) do: [ :key |
+	#(heuristicsBaseline heuristicsDependency llmCompletion hybridCompletion llmNameCompletion hybridNameCompletion rerankingCompletion neuralRerankingCompletion dependencyRerankingCompletion) do: [ :key |
 		(keys includes: key) ifTrue: [ ordered add: key. keys remove: key ] ].
 	ordered addAll: keys asSortedCollection.
 	^ ordered
@@ -71,26 +73,47 @@ CooBenchmarkChart class >> labelFor: strategy [
 		#heuristicsBaseline -> 'Baseline'.
 		#heuristicsDependency -> 'Dependency'.
 		#llmCompletion -> 'LLM (1 model token)'.
-		#hybridCompletion -> 'Hybrid (heuristics + LLM)' })
+		#hybridCompletion -> 'Hybrid (heuristics + LLM)'.
+		#llmNameCompletion -> 'LLM (complete name)'.
+		#hybridNameCompletion -> 'Hybrid (complete name)'.
+		#rerankingCompletion -> 'Hybrid (candidate reranking)'.
+		#neuralRerankingCompletion -> 'Neural-only reranking'.
+		#dependencyRerankingCompletion -> 'Dependency + neural reranking' })
 		at: strategy ifAbsent: [ strategy asString ]
 ]
 
 { #category : 'exporting' }
 CooBenchmarkChart class >> csvFor: runs [
+	| seen |
+	seen := Set new.
 	^ String streamContents: [ :out |
-		out nextPutAll: 'package,strategy,prefix,count,mrr'; lf.
+		out nextPutAll: 'package,strategy,model,prefix,count,mrr,total_ms,avg_ms,experiment,latency_condition,median_ms,p95_ms,recall_1,recall_3,recall_5,recall_10,ollama_total_ms,ollama_load_ms,prompt_eval_ms,generation_ms,heuristic_ms,memory_delta_bytes'; lf.
 		runs do: [ :run |
 			(self strategiesFor: { run }) do: [ :strategy |
-				| benchmark |
+				| benchmark identity |
 				benchmark := run results at: strategy.
-				2 to: 8 do: [ :prefix |
-					out nextPutAll: (self csvField: run package name); nextPut: $,;
-						nextPutAll: (self csvField: strategy asString); nextPut: $,;
-						print: prefix; nextPut: $,;
-						print: (benchmark totalEntriesPerPrefixSize: prefix); nextPut: $,.
-					(benchmark totalEntriesPerPrefixSize: prefix) > 0 ifTrue: [
-						out print: (benchmark mmrForPrefixSize: prefix) asFloat ].
-					out lf ] ] ] ]
+				identity := { run package name. strategy. benchmark }.
+				(seen includes: identity) ifFalse: [
+					seen add: identity.
+					2 to: 8 do: [ :prefix |
+						| count row |
+						count := benchmark totalEntriesPerPrefixSize: prefix.
+						row := OrderedCollection withAll: {
+							run package name. strategy asString. benchmark modelName. prefix. count.
+							(count > 0 ifTrue: [ (benchmark mmrForPrefixSize: prefix) asFloat ]).
+							(benchmark totalTimeForPrefix: prefix).
+							(benchmark timeSamplesForPrefix: prefix) ifNotEmpty: [ (benchmark averageTimeForPrefix: prefix) asFloat ] ifEmpty: [ nil ].
+							benchmark experiment asString. benchmark latencyCondition asString.
+							benchmark medianTimeForPrefix: prefix. benchmark p95TimeForPrefix: prefix }.
+						#(1 3 5 10) do: [ :k | row add: (count > 0 ifTrue: [
+							(benchmark accuracyForCompletionIndex: (1 to: k) withPrefixSize: prefix) asFloat ]) ].
+						#(ollamaTotalMs ollamaLoadMs promptEvalMs generationMs heuristicMs) do: [ :field |
+							row add: (self meanField: field benchmark: benchmark prefix: prefix) ].
+						row add: (benchmark averageMemoryForPrefix: prefix).
+						row do: [ :value | value ifNotNil: [
+							value isString ifTrue: [ out nextPutAll: (self csvField: value) ]
+								ifFalse: [ out print: value ] ] ] separatedBy: [ out nextPut: $, ].
+						out lf ] ] ] ] ]
 ]
 
 { #category : 'private' }
@@ -167,4 +190,35 @@ CooBenchmarkChart class >> text: text at: centerTop on: canvas font: font [
 	canvas drawString: text
 		at: (centerTop x - ((font widthOfString: text) / 2)) rounded @ centerTop y
 		font: font color: Color black
+]
+
+{ #category : 'data' }
+CooBenchmarkChart class >> meanField: field benchmark: benchmark prefix: prefix [
+	| values |
+	values := OrderedCollection new.
+	benchmark observations do: [ :record |
+		((record includesKey: #rank) and: [ (record at: #prefix) size = prefix ]) ifTrue: [
+			(record at: field ifAbsent: [ nil ]) ifNotNil: [ :value | values add: value ] ] ].
+	^ values ifEmpty: [ nil ] ifNotEmpty: [ values sum / values size asFloat ]
+]
+
+{ #category : 'exporting' }
+CooBenchmarkChart class >> exportModels: matrix to: directory [
+	| folder files index |
+	folder := directory asFileReference ensureCreateDirectory.
+	files := OrderedCollection new.
+	index := 0.
+	matrix keysAndValuesDo: [ :model :comparison |
+		index := index + 1.
+		files addAll: (self export: comparison to: folder / ('model-' , index asString)) ].
+	#(messages variables) do: [ :kind |
+		| runs file |
+		runs := OrderedCollection new.
+		matrix valuesDo: [ :comparison | runs addAll: (comparison at: kind) first ].
+		file := folder / (kind asString , '.csv').
+		file writeStreamDo: [ :out | out truncate; nextPutAll: (self csvFor: runs) ].
+		files add: file ].
+	(folder / 'models.json') writeStreamDo: [ :out |
+		out truncate; nextPutAll: (STONJSON toString: matrix keys asArray) ].
+	^ files
 ]

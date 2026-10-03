@@ -1,10 +1,10 @@
 # HeuristicCompletion-Benchmarks
 
-Compare **Baseline**, **Dependency**, **LLM (1 model token)** and **Hybrid (heuristics + LLM)**, for message selectors and uppercase variable/global names. The original heuristic algorithms and their ordering are preserved; the hybrid reuses their builder configurations.
+Compare Baseline, Dependency, prompt-based LLM/hybrid completion, and a **candidate-constrained neural reranker**, for message selectors and uppercase variable/global names. The original heuristic builders and candidate ordering are preserved.
 
 ## Load
 
-In the image where the existing benchmarks already work, load this checkout through Iceberg, or evaluate this to load the local production package:
+Use a Pharo image with the existing completion/dependency packages installed. Load this checkout through Iceberg, or evaluate:
 
 ```smalltalk
 (TonelReader
@@ -12,95 +12,158 @@ In the image where the existing benchmarks already work, load this checkout thro
     fileName: 'ExtendedHeuristicCompletion-Benchmarks') snapshot install.
 ```
 
-The existing completion/dependency packages must already be installed, as before. The added client and PNG exporter use Zinc, STONJSON and Forms from Pharo; installing the Copilot UI or a plotting package is unnecessary.
+The production package uses Zinc, STONJSON and Pharo Forms. Copilot and Python are not needed to run benchmarks or export CSV/JSONL and prefix-MRR PNGs. Python/Matplotlib is used only for the additional publication figures.
 
-Once these changes are published to GitHub, the usual load remains:
+## Quick comparison
 
-```smalltalk
-Metacello new
-    githubUser: 'omarabedelkader'
-    project: 'HeuristicCompletion-Benchmarks-Multiples'
-    commitish: 'main' path: 'src';
-    baseline: 'ExtendedHeuristicCompletionBenchmarks';
-    load.
-```
-
-## Run both benchmarks and generate the images
-
-Start your existing Ollama server with the model installed. The default connection is `http://localhost:11434`, using `pharo-llm/Qwen2.5-Coder-SFT:q4_K_M`, matching the Copilot reference project.
-
-Evaluate in a Playground:
+Start Ollama with your chosen model installed. The default remains `http://localhost:11434`, model `pharo-llm/Qwen2.5-Coder-SFT:q4_K_M`.
 
 ```smalltalk
 | comparison files |
 comparison := CooBenchRunner necTests.
-files := CooBenchRunner
-    export: comparison
-    to: '/Users/omar/Desktop/HeuristicCompletion-Benchmarks-Multiples/benchmark-results'.
+files := CooBenchRunner export: comparison to: 'benchmark-results'.
 files inspect.
 ```
 
-This runs all four strategies for **messages and variables**, then creates `messages.png` and `variables.png`: black lines with distinct markers, a legend, prefix lengths 2–8, and Average MRR on a 0–1 axis, like the reference screenshot. The hybrid uses an X marker. It also exports CSV, text, LaTeX and separate plain-LLM/hybrid JSONL audit records. Re-exporting the retained `comparison` does not run inference again. Files in the chosen output directory are replaced on re-export. Previously computed three-strategy results must be rerun to measure the hybrid.
+This runs **Baseline, Dependency, one-token LLM, one-token prompt hybrid, and candidate reranking** for both messages and variables in `NECompletion-Tests`. Single-model convenience runs use `uncontrolled` residency: they do not claim the first request is warm. Use the model matrix below for explicitly conditioned runs.
 
-`comparison at: #messages` and `comparison at: #variables` each contain the existing three-element result format: `{ runners. text. latex }`. For example:
+Each comparison contains `#messages` and `#variables`, with the existing `{ runners. text. latex }` format. Exporting retained results makes no inference requests. Re-export replaces files. Records remain in memory until exported; large runs can use substantial memory.
 
-```smalltalk
-(((comparison at: #messages) first first) results at: #llmCompletion) records inspect.
-```
+## Three separate experiments
 
-The existing `CooBenchRunnerMessage necTests` and `CooBenchRunnerVariables necTests` entry points still work and now include the LLM and hybrid strategies. Other package examples also include both. The base-class `CooBenchRunner necTests` is the convenience entry point for both kinds.
+| Experiment | Strategy selectors | Output and quality |
+| --- | --- | --- |
+| Ranking | `heuristicsBaseline`, `heuristicsDependency`, `rerankingCompletion` | Up to 10 complete names; MRR and Recall@1/3/5/10 |
+| Complete-name generation | `llmNameCompletion`, `hybridNameCompletion` | One name; exact match (equals MRR and Recall@1) |
+| One-token generation | `llmCompletion`, `hybridCompletion` | Prefix plus at most one tokenizer token; exact match |
 
-For a different set of packages:
+`llmCompletion` and `hybridCompletion` preserve the original one-token protocol: no trimming, extraction, fallback or repair. A model token may be only part of a name. These results measure a single decoding step, not unrestricted name completion.
 
-```smalltalk
-comparison := CooBenchRunner compareMessagesAndVariablesFor: #('NECompletion').
-```
+Complete-name generation allows up to **64 model tokens** with server stop sequences for whitespace and source delimiters. It additionally extracts only the initial name continuation from the response, without trimming leading whitespace. Colons remain valid for concatenated message selectors (`at:put:`); they stop variable-name generation. A standalone benchmark can change the cap with `completionTokenLimit:` after `completionLevel`. The raw response and `truncated` flag retain evidence of reaching the cap; this is bounded generation, not a guarantee that every identifier finishes.
 
-## Hybrid: give heuristic information to the model
+All neural requests use temperature 0, seed 42 and context limit 8192. Model tags, prompts, options, snapshots and raw responses are audited.
 
-For every prefix, `CooHybridLLMBenchmarks` fetches the top 10 **Dependency** suggestions and the top 10 **Baseline** suggestions using the same builders and case-sensitive prefix filter as the original benchmarks. It keeps Dependency order first, appends previously unseen Baseline names, and retains both source ranks for shared names. There are at most 20 unique hints. No expected answer is used to choose or reorder them.
+## Candidate reranking
 
-The merged hints become an additional context section **before the FIM prompt**, for example:
+`CooRerankingHybridBenchmarks` reuses the hybrid candidate extraction:
+
+1. Fetch Dependency's top 10 and Baseline's top 10, using the legacy case-sensitive prefix filter.
+2. Deduplicate names, keeping Dependency order first and retaining both source ranks.
+3. Ask Qwen to return a JSON permutation of candidate IDs, constrained by an Ollama JSON schema.
+4. Validate that every ID occurs exactly once. Blend reciprocal ranks and return the top 10 names.
+
+The default score is:
 
 ```text
-<|file_sep|>heuristic-candidates
-"Ranked completion hints; suggestions may be incorrect.
-1. yourself [Dependency rank 1, Baseline rank 3]
-2. yourOtherMethod [Baseline rank 4]
-Continue the unfinished name at the cursor."
+score(c) = alpha / neural_rank(c)
+         + beta  / dependency_rank(c)
+         + gamma / baseline_rank(c)
 ```
 
-The rank values above are illustrative. Actual hints and ranks are saved in each snapshot's `heuristicCandidates` field and in the exact request prompt. The context slot is already supported by the default and custom templates, so hybrid hints reach the model even when a template relies on prepended context.
+Default weights are `#(1 1 1)`. Missing heuristic ranks contribute zero. Ties preserve original candidate-union order. `weights:` accepts three nonnegative numbers with positive sum. **The neural score is reciprocal model-returned rank, not a token probability.** The ranking prompt contains source context and candidate IDs/names, not heuristic rank labels or the expected answer. Candidate presentation order can still influence the model.
 
-The model then generates at most **one model token**, with the same options and exact-match scoring as the plain LLM. A hint containing the correct answer does not itself earn a successful score; the model must produce the correct continuation. Empty hint sets still make one model request. There is no reranking-only shortcut or heuristic fallback.
+The request has a separate 256-token budget for the JSON permutation. An empty union returns no suggestions and skips inference. Missing/duplicate/out-of-range IDs, malformed JSON, truncated invalid rankings, HTTP errors, and missing models raise errors. They are audited and never silently converted into heuristic fallback or ordinary accuracy misses. A valid output can only contain supplied names. Heuristic candidates are structurally informed suggestions, not a guarantee of type validity.
 
-Candidate fetching temporarily assigns the typed prefix to the AST node, just as the legacy benchmarks do, and restores it with `ensure:` even if fetching fails. It runs against the existing heuristic AST/environment; no method bodies are added to the model prompt. A correct name may legitimately appear among the hints. Heuristic failures are recorded and raised before contacting the model, rather than silently becoming an empty list.
+The following ablations are available:
 
-Inspect the hybrid's audit records with:
+- `neuralRerankingCompletion`: same Dependency+Baseline union, weights `#(1 0 0)`.
+- `dependencyRerankingCompletion`: Dependency-only candidate set, weights `#(1 1 0)`.
+- `rerankingCompletion`: Dependency+Baseline union, weights `#(1 1 1)`.
+
+The existing prompt hybrid continues to put heuristic hints before its FIM prompt. Having the correct answer among those hints earns no credit unless its generated continuation matches the target.
+
+AST prefix mutations are restored with `ensure:`. Candidate extraction never uses the expected answer to reorder suggestions. Reranking records include the candidate pool, original source ranks, model order, score for each candidate, weights and final top 10.
+
+## Run the four-model matrix
 
 ```smalltalk
-(((comparison at: #messages) first first) results at: #hybridCompletion) records inspect.
+| matrix |
+matrix := CooBenchRunner
+    compareModels: CooLLMClient benchmarkModels
+    messagesAndVariablesFor: #('NECompletion-Tests').
+CooBenchRunner exportModels: matrix to: 'benchmark-results'.
 ```
 
-Exports include `messages-1-hybrid.jsonl` and `variables-1-hybrid.jsonl` (the number identifies the package in a multi-package run). CSV, text, LaTeX and both PNGs include the hybrid as a separate strategy.
-
-An explicit runner can select the desired strategies with `others: #(heuristicsDependency llmCompletion hybridCompletion)`. To customize the hint sources on a standalone hybrid benchmark, send `heuristics:` **after** `kind:` with ordered associations from a label to a configured `CooStaticBenchmarksMessage` or `CooStaticBenchmarksVariables` instance. For example, to supply only Dependency hints:
+`benchmarkModels` provides the requested explicit tags:
 
 ```smalltalk
-hybrid := CooHybridLLMBenchmarks new
-    kind: #messages;
-    heuristics: { #Dependency -> (CooStaticBenchmarksMessage new
-        builder: CooBenchRunnerMessage new dependencyBuilder;
-        yourself) };
-    scope: (CoBenchmarkPackage on:
-        (PackageOrganizer default packageNamed: 'NECompletion-Tests'));
-    run;
-    yourself.
+#('pharo-llm/Qwen2.5-Coder-SFT:0.5B'
+  'pharo-llm/Qwen2.5-Coder-SFT:1.5B'
+  'pharo-llm/Qwen2.5-Coder-SFT:3b'
+  'pharo-llm/Qwen2.5-Coder-SFT:7b')
 ```
 
-## Model and template configuration
+Tags must already exist in your Ollama installation. No model is downloaded or silently substituted. Tags alone do not ensure equal quantization; use matching quantization variants for a controlled size study and retain their Ollama metadata with your report. The matrix uses explicit client copies, preserves `CooLLMClient default`, and shares the same Baseline/Dependency result objects across models rather than measuring them repeatedly.
 
-Configuration is separate from your editor's completion settings:
+The default matrix runs both generation experiments and blended reranking in the **warm** condition. To select ablations or run cold measurements separately:
+
+```smalltalk
+matrix := CooBenchRunner
+    compareModels: CooLLMClient benchmarkModels
+    messagesAndVariablesFor: #('NECompletion-Tests')
+    strategies: #(rerankingCompletion neuralRerankingCompletion dependencyRerankingCompletion)
+    latencyCondition: #cold.
+```
+
+A run can be large: every neural strategy makes one request per eligible callsite/prefix (except empty reranking pools). Start with a small fixture/package.
+
+## Latency, quality and exports
+
+CSV begins with the requested columns:
+
+```text
+package,strategy,model,prefix,count,mrr,total_ms,avg_ms
+```
+
+Additional columns contain experiment, residency condition, median, nearest-rank P95, Recall@1/3/5/10, mean Ollama total/load/prompt/decode times, heuristic extraction time, and mean Pharo memory delta. Missing measurements are blank, not fabricated zeros. Static strategy model identity is `none`. Matrix-level CSV includes shared static observations only once.
+
+All strategies retain individual wall-time observations in milliseconds, measured with Pharo's microsecond clock. Timing ends when candidates are available, before quality scoring and bookkeeping. Static JSONL records contain target, prefix, rank and wall time; neural records also contain model, experiment, condition, snapshot, exact request/response, preparation response, candidate(s) and timings. Failed neural requests retain an error and elapsed time but do not enter quality or latency aggregates.
+
+Ollama timing fields are retained in nanoseconds and converted to milliseconds:
+
+- `ollamaTotalNs` / `ollamaTotalMs`: server total duration.
+- `ollamaLoadNs` / `ollamaLoadMs`: loading duration.
+- `promptEvalNs` / `promptEvalMs`, plus `promptTokens`: prompt evaluation.
+- `generationNs` / `generationMs`, plus `generatedTokens`: decoding.
+- `wallTimeMs`: full client completion request, including heuristic extraction and prompt construction.
+- `heuristicMs`: candidate extraction for hybrids.
+
+Missing server fields remain `nil`. Decode duration means one-step cost only when exactly one output token was generated. Pharo memory deltas are **not model RAM/VRAM or process peak memory**; measure those externally if needed.
+
+Residency policies:
+
+- `warm`: load the model with an empty prompt before the first measured request of each benchmark, retain it with `keep_alive: '5m'`.
+- `cold`: request unloading immediately before each measured completion; the measured generation includes model loading. Unloading itself is excluded.
+- `uncontrolled`: no preload or unload; report observed load duration without claiming warmth.
+
+Preparation responses are audited separately from measured completions. Warm preload does not warm the actual source prompt/KV cache. Concurrent Ollama clients or a long idle interval can still change residency; keep load measurements and run conditions in the report.
+
+Exports include `messages.csv`, `variables.csv`, prefix-MRR PNGs, text/LaTeX summaries, and one JSONL file per package/strategy. Existing `*-llm.jsonl` and `*-hybrid.jsonl` names are retained. Other files use strategy names. Matrix exports add `model-1/`, `model-2/`, etc., and `models.json` mapping their order to tags.
+
+## Quality–latency and decomposition figures
+
+```sh
+python3 -m venv .venv-plots
+.venv-plots/bin/pip install -r scripts/requirements-plots.txt
+.venv-plots/bin/python scripts/plot-results.py benchmark-results
+```
+
+The script exports PNG and PDF figures under `benchmark-results/figures`, separately by completion kind, experiment and latency condition. Each shows quality versus mean E2E latency, the observed Pareto frontier, and stacked mean latency components. Ranking uses MRR; generation uses Recall@1/exact match. Static results appear as labeled reference points. Package/prefix aggregates are weighted by observation count. Use `--prefix 3` to plot one prefix length.
+
+Missing decomposition telemetry is displayed as total E2E latency, not a zero segment. The residual segment includes remaining client/server work. Median/P95 are exported per prefix from individual samples; the plotting script does not average percentiles across groups.
+
+## Context and evaluation population
+
+Snapshots contain class/superclass and variable declarations, plus source before the completion and the typed prefix. Suffix is empty. Neither the untyped target nor following source is supplied through another context channel. Earlier source and declarations may legitimately mention the same name. The expected answer and method identity are audit metadata, not model inputs.
+
+The legacy population remains unchanged:
+
+- Prefix lengths 2 through `min(name size, 8)`, including fully typed short names.
+- Variables are uppercase names (globals/classes), not all local variables.
+- Keyword targets are full concatenated selectors, such as `at:put:`. This is the legacy selector-prefix task, not arbitrary code infilling.
+- MRR across packages is weighted by callsite count; empty prefixes are blank/missing.
+
+For custom clients/templates:
 
 ```smalltalk
 CooLLMClient default
@@ -109,59 +172,32 @@ CooLLMClient default
     timeout: 120.
 ```
 
-To explicitly reuse an already loaded `pharo-copilot` connection (including its remote authentication), model and FIM template:
+`useCopilotConnection` explicitly reuses an installed Copilot connection. FIM generation supports literal `{{ .Context }}`, `{{ .Prompt }}`, and `{{ .Suffix }}` placeholders; replacement is single-pass and context is prepended if its slot is absent. Reranking uses a separate raw ranking prompt with a JSON schema, independent of the FIM template.
 
-```smalltalk
-CooLLMClient default useCopilotConnection.
-```
-
-The raw FIM protocol follows `CoPCOllamaClient` in the reference project. Each request sets `stream: false`, `raw: true`, `num_predict: 1`, `temperature: 0`, `seed: 42`, `num_ctx: 8192`, and the FIM stop sequences. No model is downloaded, editor setting changed, or heuristic fallback invoked. See the [Ollama generation API](https://docs.ollama.com/api/generate) and [generation parameters](https://docs.ollama.com/modelfile).
-
-The default template is:
-
-```text
-{{ .Context }}<|fim_prefix|>{{ .Prompt }}<|fim_suffix|>{{ .Suffix }}<|fim_middle|>
-```
-
-To change it, use `CooLLMClient default template: aString`. The supported literal placeholders are `{{ .Prompt }}`, `{{ .Suffix }}` and `{{ .Context }}`; this is not a Go template interpreter. The prompt slot is required. If the context slot is absent, context is prepended, as in Copilot. Substitution is a single pass, so placeholder-looking text inside source is preserved literally. Models with different special tokens need an appropriate template.
-
-## Context snapshots and scoring
-
-For every callsite and prefix, `CooLLMContextSnapshot` captures class name, superclass, instance/class variable declarations, and the method source **before the completion**, followed by the typed prefix. Line endings are normalized to LF. The suffix is empty to model left-to-right typing. The plain snapshot sends neither the untyped target, subsequent source, nor the enclosing method body through a second context channel. Legitimate earlier source/declarations can naturally contain the same name. Snapshots contain no mutable AST references. The hybrid adds only the ranked hints described above.
-
-Each audit record retains the snapshot, exact rendered prompt, model/options/template, raw response and token counts, candidate, expected answer and rank. The expected answer and method identity are audit metadata only, not prompt inputs. Records are held in memory until export; long runs can consume substantial memory.
-
-**One model token is not necessarily one complete Smalltalk name.** A token can contain only a subword, or whitespace/punctuation. The only candidate is `typedPrefix , generatedText`. It scores rank 1 only if it exactly matches the entire original selector/name; otherwise rank 0. There is no trimming, word extraction, resampling or hidden completion of the generated fragment. Consequently the LLM's MRR equals exact-match accuracy, while the heuristics can score at ranks 1–10.
-
-The legacy evaluation population is deliberately preserved:
-
-- Prefix sizes are 2 through `min(name size, 8)`, including already complete short names. A model that keeps generating after a complete name can miss these cases.
-- Variables mean uppercase names (globals/classes), not all local variables.
-- Keyword-message targets are full concatenated selectors, e.g. `at:put:`. The simulated prefix can be `at:p`; the held-out arguments and later keywords are not copied into the prompt. This is the legacy selector-prefix task, not arbitrary code infilling.
-- Across multiple packages, chart MRR is weighted by callsite count at each prefix. Prefixes with no observations are gaps and blank CSV scores.
-
-HTTP errors, missing models, malformed responses or a reported token count above one raise an error rather than becoming misleading accuracy misses. A runner retains its completed heuristic results and partial LLM diagnostics when interrupted; retain an explicit runner if you need to inspect it after an error:
+An explicit runner retains partial results after errors:
 
 ```smalltalk
 runner := CooBenchRunnerMessage new
     package: (PackageOrganizer default packageNamed: 'NECompletion-Tests');
     baseline: #heuristicsBaseline;
-    others: #(heuristicsDependency llmCompletion hybridCompletion);
+    others: #(heuristicsDependency rerankingCompletion);
+    latencyCondition: #warm;
     yourself.
 runner run.
 ```
 
-To run only the original strategies, use `others: #(heuristicsDependency)` in that example.
+For only the original static strategies, use `others: #(heuristicsDependency)`.
 
 ## Validation
 
-Run in a **disposable copy** of your working Pharo image, from the repository root:
+Run from the repository root in a **disposable copy** of your working Pharo image, including its matching `.changes` and `.sources` files:
 
 ```sh
 pharo --headless /path/to/copy.image st --quit scripts/test.st
-pharo --headless /path/to/copy.image st --quit scripts/smoke-llm.st
+pharo --headless /path/to/copy.image st --quit scripts/smoke-experiments.st
+python3 scripts/test_plot_results.py
 ```
 
-`test.st` loads and runs the existing regression tests plus the new offline tests. `smoke-llm.st` calls real Ollama on a tiny fixture package and exports to `benchmark-smoke-results`; those plots are smoke-test measurements, not NECompletion results. Neither script saves the image. The baseline also exposes a `Tests` group.
+The offline smoke runs two fake model identities through all experiments/ablations and exports under `benchmark-smoke-results/experiments`. Its figures are synthetic validation artifacts, never research results. `scripts/smoke-llm.st` runs the default comparison against real Ollama on a tiny fixture. Neither script saves the image.
 
-A full run sends one request per eligible callsite/prefix **for each model strategy**. In the validation image, `NECompletion-Tests` requires **6,998 message requests and 136 variable requests per strategy**, or **14,268 total** with both plain LLM and hybrid; the count depends on the image contents. Expect a substantially longer run than the heuristic benchmarks.
+Protocol references: [Ollama generate API and timing units](https://docs.ollama.com/api/generate), [structured outputs](https://docs.ollama.com/capabilities/structured-outputs), and [generation parameters](https://docs.ollama.com/modelfile).
