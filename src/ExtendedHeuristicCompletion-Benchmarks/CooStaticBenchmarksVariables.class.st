@@ -94,8 +94,8 @@ CooStaticBenchmarksVariables >> benchCallsite: aVariable atPosition: aPosition [
 
 	| oldName |
 	oldName := aVariable name.
-	[ 2 to: (self maxPrefixSizeFor: aVariable) do: [ :index |
-		| prefix startTime startMemory completion candidates completionIndex elapsed |
+	2 to: (self maxPrefixSizeFor: aVariable) do: [ :index |
+		| prefix startTime startMemory completion candidates completionIndex |
 		startTime := self startTimeMeasurement.
 		startMemory := self startMemoryMeasurement.
 
@@ -109,7 +109,6 @@ CooStaticBenchmarksVariables >> benchCallsite: aVariable atPosition: aPosition [
 		candidates := self
 			              fetchTopCandidatesFrom: completion
 			              usingPrefix: prefix.
-		elapsed := self startTimeMeasurement - startTime.
 		completionIndex := self
 			                   findCompletionIndexFor: oldName
 			                   inCandidates: candidates.
@@ -120,10 +119,9 @@ CooStaticBenchmarksVariables >> benchCallsite: aVariable atPosition: aPosition [
 			withPrefix: prefix.
 
 		self logMemoryUsageSince: startMemory forPrefixSize: prefix size.
-		self logTime: elapsed forPrefix: prefix size.
-		self recordCompletion: oldName prefix: prefix rank: completionIndex elapsed: elapsed ].
+		self logExecutionTimeSince: startTime forPrefixSize: prefix size ].
 	
-	] ensure: [ aVariable name: oldName ]
+		aVariable name: oldName 
 
 ]
 
@@ -161,10 +159,10 @@ CooStaticBenchmarksVariables >> findCompletionIndexFor: variableName inCandidate
 
 { #category : 'benchmarks' }
 CooStaticBenchmarksVariables >> logExecutionTimeSince: startTime forPrefixSize: prefixSize [
-	| elapsed |
-	elapsed := self startTimeMeasurement - startTime.
-	self logTime: elapsed forPrefix: prefixSize.
-	^ elapsed
+
+	| executionTime |
+	executionTime := Time millisecondClockValue - startTime.
+	self logTime: executionTime forPrefix: prefixSize
 ]
 
 { #category : 'benchmarks' }
@@ -198,7 +196,8 @@ CooStaticBenchmarksVariables >> startMemoryMeasurement [
 
 { #category : 'benchmarks' }
 CooStaticBenchmarksVariables >> startTimeMeasurement [
-	^ Time microsecondClockValue / 1000.0
+
+	^ Time millisecondClockValue
 ]
 
 { #category : 'benchmarks' }

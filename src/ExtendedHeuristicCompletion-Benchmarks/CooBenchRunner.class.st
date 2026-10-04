@@ -8,9 +8,7 @@ Class {
 		'package',
 		'baseline',
 		'others',
-		'results',
-		'llmClient',
-		'latencyCondition'
+		'results'
 	],
 	#category : 'ExtendedHeuristicCompletion-Benchmarks-Benchmarks',
 	#package : 'ExtendedHeuristicCompletion-Benchmarks',
@@ -200,107 +198,31 @@ CooBenchRunner >> results [
 
 { #category : 'LLM' }
 CooBenchRunner >> llmCompletionFor: kind [
-	^ self modelBenchmark: CooLLMBenchmarks kind: kind strategy: #llmCompletion configure: [ :bench | ]
+	| benchmark |
+	benchmark := CooLLMBenchmarks new
+		kind: kind;
+		scope: (CoBenchmarkPackage on: package);
+		yourself.
+	"Retain partial diagnostics if an HTTP/server error interrupts this run."
+	results ifNotNil: [ results at: #llmCompletion put: benchmark ].
+	^ benchmark run; yourself
 ]
 
 { #category : 'accessing' }
 CooBenchRunner >> run [
-	^ self runWithResults: Dictionary new
+
+	results := Dictionary new.
+	{ baseline } , others do: [ :s |
+		results at: s put: (self perform: s) ]
 ]
 
 { #category : 'LLM' }
 CooBenchRunner >> hybridCompletionFor: kind [
-	^ self modelBenchmark: CooHybridLLMBenchmarks kind: kind strategy: #hybridCompletion configure: [ :bench | ]
-]
-
-{ #category : 'accessing' }
-CooBenchRunner >> client: aClient [
-	llmClient := aClient
-]
-
-{ #category : 'accessing' }
-CooBenchRunner >> latencyCondition: condition [
-	latencyCondition := condition
-]
-
-{ #category : 'benchmarks' }
-CooBenchRunner >> runWithResults: existingResults [
-	results := existingResults copy.
-	{ baseline } , others do: [ :strategy |
-		results at: strategy ifAbsentPut: [ self perform: strategy ] ]
-]
-
-{ #category : 'LLM' }
-CooBenchRunner >> modelBenchmark: benchmarkClass kind: kind strategy: strategy configure: block [
 	| benchmark |
-	benchmark := benchmarkClass new
+	benchmark := CooHybridLLMBenchmarks new
 		kind: kind;
-		client: (llmClient ifNil: [ CooLLMClient default ] ) copy;
-		latencyCondition: (latencyCondition ifNil: [ #uncontrolled ]);
 		scope: (CoBenchmarkPackage on: package);
 		yourself.
-	block value: benchmark.
-	results ifNotNil: [ results at: strategy put: benchmark ].
+	results ifNotNil: [ results at: #hybridCompletion put: benchmark ].
 	^ benchmark run; yourself
-]
-
-{ #category : 'LLM' }
-CooBenchRunner >> nameCompletionFor: kind hybrid: hybrid [
-	^ self modelBenchmark: (hybrid ifTrue: [ CooHybridLLMBenchmarks ] ifFalse: [ CooLLMBenchmarks ])
-		kind: kind strategy: (hybrid ifTrue: [ #hybridNameCompletion ] ifFalse: [ #llmNameCompletion ])
-		configure: [ :bench | bench completionLevel ]
-]
-
-{ #category : 'LLM' }
-CooBenchRunner >> rerankingFor: kind strategy: strategy [
-	^ self modelBenchmark: CooRerankingHybridBenchmarks kind: kind strategy: strategy configure: [ :bench |
-		strategy = #neuralRerankingCompletion ifTrue: [ bench weights: #(1 0 0) ].
-		strategy = #dependencyRerankingCompletion ifTrue: [
-			bench weights: #(1 1 0);
-				heuristics: { #Dependency -> ((kind = #messages
-					ifTrue: [ CooStaticBenchmarksMessage ] ifFalse: [ CooStaticBenchmarksVariables ]) new
-					builder: self dependencyBuilder; yourself) } ] ]
-]
-
-{ #category : 'benchmarks' }
-CooBenchRunner class >> compareModels: modelNames messagesAndVariablesFor: packageNames [
-	^ self compareModels: modelNames messagesAndVariablesFor: packageNames
-		strategies: #(llmCompletion hybridCompletion llmNameCompletion hybridNameCompletion rerankingCompletion)
-		latencyCondition: #warm
-]
-
-{ #category : 'benchmarks' }
-CooBenchRunner class >> compareModels: modelNames messagesAndVariablesFor: packageNames strategies: strategies latencyCondition: condition [
-	"Use explicit clients, never mutate the process-wide default. Static results
-	are shared, not measured again for each model. All runs use the same packages."
-	| matrix staticResults packages |
-	matrix := OrderedDictionary new.
-	staticResults := Dictionary new.
-	packages := packageNames collect: [ :each | PackageOrganizer default packageNamed: each ].
-	modelNames do: [ :modelName |
-		| comparison client |
-		client := CooLLMClient default copy model: modelName; yourself.
-		comparison := Dictionary new.
-		{ #messages -> CooBenchRunnerMessage. #variables -> CooBenchRunnerVariables } do: [ :entry |
-			| runs |
-			runs := packages collect: [ :pack |
-				| runner key shared |
-				key := { entry key. pack name }.
-				runner := entry value new package: pack; baseline: #heuristicsBaseline;
-					others: #(heuristicsDependency); yourself.
-				shared := staticResults at: key ifAbsentPut: [ runner run. runner results ].
-				runner client: client; latencyCondition: condition;
-					others: #(heuristicsDependency) , strategies;
-					runWithResults: shared.
-				runner ].
-			comparison at: entry key put: { runs.
-				self stringResultForABenchCollection: runs.
-				self latexTableResultForABenchCollection: runs } ].
-		matrix at: modelName put: comparison ].
-	^ matrix
-]
-
-{ #category : 'exporting' }
-CooBenchRunner class >> exportModels: matrix to: directory [
-	^ CooBenchmarkChart exportModels: matrix to: directory
 ]

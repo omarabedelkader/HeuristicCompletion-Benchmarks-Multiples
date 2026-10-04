@@ -234,7 +234,7 @@ CooBenchRunnerVariables class >> runComparisonForPackages: aCol [
 				  package: pack;
 				  baseline: #heuristicsBaseline;
 				  others:
-					  { #heuristicsDependency. #llmCompletion. #hybridCompletion. #rerankingCompletion };
+					  { #heuristicsDependency. #llmCompletion. #hybridCompletion };
 				  run ]
 ]
 
@@ -406,29 +406,4 @@ CooBenchRunnerVariables >> dependencyBuilder [
 { #category : 'LLM' }
 CooBenchRunnerVariables >> hybridCompletion [
 	^ self hybridCompletionFor: #variables
-]
-
-{ #category : 'LLM' }
-CooBenchRunnerVariables >> rerankingCompletion [
-	^ self rerankingFor: #variables strategy: #rerankingCompletion
-]
-
-{ #category : 'LLM' }
-CooBenchRunnerVariables >> neuralRerankingCompletion [
-	^ self rerankingFor: #variables strategy: #neuralRerankingCompletion
-]
-
-{ #category : 'LLM' }
-CooBenchRunnerVariables >> dependencyRerankingCompletion [
-	^ self rerankingFor: #variables strategy: #dependencyRerankingCompletion
-]
-
-{ #category : 'LLM' }
-CooBenchRunnerVariables >> llmNameCompletion [
-	^ self nameCompletionFor: #variables hybrid: false
-]
-
-{ #category : 'LLM' }
-CooBenchRunnerVariables >> hybridNameCompletion [
-	^ self nameCompletionFor: #variables hybrid: true
 ]

@@ -17,11 +17,11 @@ files do: [ :file | Stdio stdout nextPutAll: file fullName; lf ].
 	| runner baseline |
 	runner := (comparison at: kind) first first.
 	baseline := runner results at: #heuristicsBaseline.
-	#(llmCompletion hybridCompletion rerankingCompletion) do: [ :strategy |
+	#(llmCompletion hybridCompletion) do: [ :strategy |
 		| llm |
 		llm := runner results at: strategy.
 		2 to: 8 do: [ :prefix |
 			(llm totalEntriesPerPrefixSize: prefix) = (baseline totalEntriesPerPrefixSize: prefix)
 				ifFalse: [ self error: 'LLM and baseline populations differ' ] ].
 		Stdio stdout nextPutAll: kind asString; nextPutAll: ' '; nextPutAll: strategy asString; nextPutAll: ': ';
-			print: llm records size; nextPutAll: ' real completion observations'; lf ] ].
+			print: llm records size; nextPutAll: ' real one-token requests'; lf ] ].

@@ -169,7 +169,7 @@ CooBenchRunnerMessage class >> runComparisonForPackages: aCol [
 			  self new
 				  package: pack;
 				  baseline: #heuristicsBaseline;
-				  others: { #heuristicsDependency. #llmCompletion. #hybridCompletion. #rerankingCompletion };
+				  others: { #heuristicsDependency. #llmCompletion. #hybridCompletion };
 				  run ]
 ]
 
@@ -303,29 +303,4 @@ CooBenchRunnerMessage >> dependencyBuilder [
 { #category : 'LLM' }
 CooBenchRunnerMessage >> hybridCompletion [
 	^ self hybridCompletionFor: #messages
-]
-
-{ #category : 'LLM' }
-CooBenchRunnerMessage >> rerankingCompletion [
-	^ self rerankingFor: #messages strategy: #rerankingCompletion
-]
-
-{ #category : 'LLM' }
-CooBenchRunnerMessage >> neuralRerankingCompletion [
-	^ self rerankingFor: #messages strategy: #neuralRerankingCompletion
-]
-
-{ #category : 'LLM' }
-CooBenchRunnerMessage >> dependencyRerankingCompletion [
-	^ self rerankingFor: #messages strategy: #dependencyRerankingCompletion
-]
-
-{ #category : 'LLM' }
-CooBenchRunnerMessage >> llmNameCompletion [
-	^ self nameCompletionFor: #messages hybrid: false
-]
-
-{ #category : 'LLM' }
-CooBenchRunnerMessage >> hybridNameCompletion [
-	^ self nameCompletionFor: #messages hybrid: true
 ]

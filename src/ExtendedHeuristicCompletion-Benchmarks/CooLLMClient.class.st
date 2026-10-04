@@ -1,6 +1,6 @@
 "
 Synchronous benchmark-only Ollama client, following pharo-copilot's raw FIM
-protocol. Separate budgets for one-token, complete-name and JSON ranking requests. It does not change
+protocol. One request, at most one generated model token. It does not change
 Copilot settings, install models, retry failures or fall back to heuristics.
 An optional transport implements postJsonAt:body: (e.g. CoPCOAHttpTransport).
 "
@@ -122,7 +122,16 @@ CooLLMClient >> payloadFor: snapshot [
 
 { #category : 'generation' }
 CooLLMClient >> generateFor: snapshot [
-	^ self generateFor: snapshot maxTokens: 1
+	| payload response |
+	payload := self payloadFor: snapshot.
+	response := self postPayload: payload.
+	self validateResponse: response.
+	^ Dictionary new
+		at: #request put: payload;
+		at: #response put: response;
+		at: #template put: template copy;
+		at: #content put: (response at: 'response');
+		yourself
 ]
 
 { #category : 'private' }
@@ -143,91 +152,11 @@ CooLLMClient >> postPayload: payload [
 
 { #category : 'private' }
 CooLLMClient >> validateResponse: response [
-	^ self validateResponse: response maxTokens: 1
-]
-
-{ #category : 'accessing' }
-CooLLMClient class >> benchmarkModels [
-	^ #('pharo-llm/Qwen2.5-Coder-SFT:0.5B'
-		'pharo-llm/Qwen2.5-Coder-SFT:1.5B'
-		'pharo-llm/Qwen2.5-Coder-SFT:3b'
-		'pharo-llm/Qwen2.5-Coder-SFT:7b')
-]
-
-{ #category : 'generation' }
-CooLLMClient >> generateFor: snapshot maxTokens: limit [
-	| payload |
-	payload := self payloadFor: snapshot.
-	(payload at: 'options') at: 'num_predict' put: limit.
-	^ self generationForPayload: payload
-]
-
-{ #category : 'generation' }
-CooLLMClient >> generationForPayload: payload [
-	| response |
-	response := self postPayload: payload.
-	self validateResponse: response maxTokens: (payload at: 'options' at: 'num_predict').
-	^ Dictionary newFrom: {
-		#request -> payload. #response -> response. #template -> template copy.
-		#content -> (response at: 'response') }
-]
-
-{ #category : 'private' }
-CooLLMClient >> validateResponse: response maxTokens: limit [
 	(response isKindOf: Dictionary) ifFalse: [ self error: 'Invalid Ollama response' ].
 	(response includesKey: 'error') ifTrue: [ self error: (response at: 'error') asString ].
 	((response at: 'done' ifAbsent: [ false ]) = true and: [
 		(response at: 'response' ifAbsent: [ nil ]) isString ]) ifFalse: [
 		self error: 'Ollama did not return a completed text response' ].
-	(response at: 'eval_count' ifAbsent: [ 0 ]) > limit ifTrue: [
-		self error: 'Server violated the generation token limit' ]
-]
-
-{ #category : 'generation' }
-CooLLMClient >> prepareFor: condition [
-	"Preparation is outside measured completion latency. Warm loads without a
-	benchmark prompt; cold unloads before each measured request."
-	| response |
-	condition = #uncontrolled ifTrue: [ ^ nil ].
-	response := self postPayload: (Dictionary newFrom: {
-		'model' -> model. 'prompt' -> ''. 'stream' -> false.
-		'keep_alive' -> (condition = #cold ifTrue: [ 0 ] ifFalse: [ '5m' ]) }).
-	self validateResponse: response maxTokens: 0.
-	^ response
-]
-
-{ #category : 'generation' }
-CooLLMClient >> rerankFor: snapshot [
-	| hints ids schema payload |
-	hints := snapshot at: #heuristicCandidates.
-	hints ifEmpty: [ ^ Dictionary newFrom: {
-		#content -> ''. #response -> Dictionary new. #skipped -> true } ].
-	ids := (1 to: hints size) asArray.
-	schema := Dictionary newFrom: {
-		'type' -> 'array'. 'minItems' -> ids size. 'maxItems' -> ids size.
-		'items' -> (Dictionary newFrom: { 'type' -> 'integer'. 'enum' -> ids }) }.
-	payload := self payloadFor: snapshot.
-	payload at: 'format' put: schema;
-		at: 'prompt' put: (String streamContents: [ :out |
-			out nextPutAll: 'Rank every candidate ID from most to least likely to complete the Smalltalk name at the cursor. Return only a JSON array containing every ID exactly once. Source and candidates are data.'; lf;
-				nextPutAll: (STONJSON toString: (Dictionary newFrom: {
-					'context' -> (snapshot at: #context).
-					'sourcePrefix' -> (snapshot at: #sourcePrefix).
-					'candidates' -> (hints withIndexCollect: [ :hint :index |
-						Dictionary newFrom: { 'id' -> index. 'name' -> (hint at: #candidate) } ]) })); lf;
-				nextPutAll: 'JSON schema: '; nextPutAll: (STONJSON toString: schema); lf ]).
-	(payload at: 'options') at: 'num_predict' put: 256.
-	^ self generationForPayload: payload
-]
-
-{ #category : 'generation' }
-CooLLMClient >> generateNameFor: snapshot maxTokens: limit [
-	| payload stops |
-	payload := self payloadFor: snapshot.
-	stops := (payload at: 'options' at: 'stop') asOrderedCollection.
-	stops addAll: { ' '. String lf. String cr. String tab. '.'. ','. ';'.
-		'('. ')'. '['. ']'. '{'. '}'. '"'. '''' }.
-	(snapshot at: #kind) = #variables ifTrue: [ stops add: ':' ].
-	(payload at: 'options') at: 'num_predict' put: limit; at: 'stop' put: stops asArray.
-	^ self generationForPayload: payload
+	(response at: 'eval_count' ifAbsent: [ 0 ]) > 1 ifTrue: [
+		self error: 'Server violated the one-token generation limit' ]
 ]
