@@ -234,7 +234,7 @@ CooBenchRunnerVariables class >> runComparisonForPackages: aCol [
 				  package: pack;
 				  baseline: #heuristicsBaseline;
 				  others:
-					  { #heuristicsDependency. #llmCompletion. #hybridCompletion };
+					  { #heuristicsDependency. #llmCompletion };
 				  run ]
 ]
 
@@ -357,7 +357,10 @@ CooBenchRunnerVariables class >> specTests [
 CooBenchRunnerVariables >> heuristicsBaseline [
 
 	| builder benchmark |
-	builder := self baselineBuilder.
+	builder := CoASTHeuristicsResultSetBuilder new.
+	builder variablesHeuristic: (builder newHeuristicBuilder
+			 add: CoGlobalVariablesHeuristic new;
+			 build).
 	benchmark := CooStaticBenchmarksVariables new
 		             name: 'Baseline';
 		             scope: (CoBenchmarkPackage on: package);
@@ -370,28 +373,6 @@ CooBenchRunnerVariables >> heuristicsBaseline [
 CooBenchRunnerVariables >> heuristicsDependency [
 
 	| builder benchmark |
-	builder := self dependencyBuilder.
-	benchmark := CooStaticBenchmarksVariables new
-		             name: 'Dependency';
-		             scope: (CoBenchmarkPackage on: package);
-		             builder: builder;
-		             run.
-	^ benchmark
-]
-
-{ #category : 'Heuristics' }
-CooBenchRunnerVariables >> baselineBuilder [
-	| builder |
-	builder := CoASTHeuristicsResultSetBuilder new.
-	builder variablesHeuristic: (builder newHeuristicBuilder
-			 add: CoGlobalVariablesHeuristic new;
-			 build).
-	^ builder
-]
-
-{ #category : 'Heuristics' }
-CooBenchRunnerVariables >> dependencyBuilder [
-	| builder |
 	builder := CoASTHeuristicsResultSetBuilder new.
 	builder variablesHeuristic: (builder newHeuristicBuilder
 			 add: CoLocalScopeVariablesHeuristic new;
@@ -400,10 +381,10 @@ CooBenchRunnerVariables >> dependencyBuilder [
 			 add: (CoGlobalVariablesHeuristic new globalVariableFetcherClass: CoDependencyGlobalVariableFetcher);
 			 add: CoGlobalVariablesHeuristic new;
 			 build).
-	^ builder
-]
-
-{ #category : 'LLM' }
-CooBenchRunnerVariables >> hybridCompletion [
-	^ self hybridCompletionFor: #variables
+	benchmark := CooStaticBenchmarksVariables new
+		             name: 'Dependency';
+		             scope: (CoBenchmarkPackage on: package);
+		             builder: builder;
+		             run.
+	^ benchmark
 ]

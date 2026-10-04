@@ -1,6 +1,6 @@
 # HeuristicCompletion-Benchmarks
 
-Compare **Baseline**, **Dependency**, **LLM (1 model token)** and **Hybrid (heuristics + LLM)**, for message selectors and uppercase variable/global names. The original heuristic algorithms and their ordering are preserved; the hybrid reuses their builder configurations.
+Compare the existing **Baseline** and **Dependency** strategies with **LLM (1 model token)**, for message selectors and uppercase variable/global names. The two heuristic implementations are unchanged.
 
 ## Load
 
@@ -40,7 +40,7 @@ files := CooBenchRunner
 files inspect.
 ```
 
-This runs all four strategies for **messages and variables**, then creates `messages.png` and `variables.png`: black lines with distinct markers, a legend, prefix lengths 2–8, and Average MRR on a 0–1 axis, like the reference screenshot. The hybrid uses an X marker. It also exports CSV, text, LaTeX and separate plain-LLM/hybrid JSONL audit records. Re-exporting the retained `comparison` does not run inference again. Files in the chosen output directory are replaced on re-export. Previously computed three-strategy results must be rerun to measure the hybrid.
+This runs all three strategies for **messages and variables**, then creates `messages.png` and `variables.png`: black lines with distinct markers, a legend, prefix lengths 2–8, and Average MRR on a 0–1 axis, like the reference screenshot. It also exports CSV, text, LaTeX and LLM JSONL audit records. Re-exporting the retained `comparison` does not run inference again. Files in the chosen output directory are replaced on re-export.
 
 `comparison at: #messages` and `comparison at: #variables` each contain the existing three-element result format: `{ runners. text. latex }`. For example:
 
@@ -48,54 +48,12 @@ This runs all four strategies for **messages and variables**, then creates `mess
 (((comparison at: #messages) first first) results at: #llmCompletion) records inspect.
 ```
 
-The existing `CooBenchRunnerMessage necTests` and `CooBenchRunnerVariables necTests` entry points still work and now include the LLM and hybrid strategies. Other package examples also include both. The base-class `CooBenchRunner necTests` is the convenience entry point for both kinds.
+The existing `CooBenchRunnerMessage necTests` and `CooBenchRunnerVariables necTests` entry points still work and now include the LLM strategy. Other package examples also include it. The base-class `CooBenchRunner necTests` is the new convenience entry point for both kinds.
 
 For a different set of packages:
 
 ```smalltalk
 comparison := CooBenchRunner compareMessagesAndVariablesFor: #('NECompletion').
-```
-
-## Hybrid: give heuristic information to the model
-
-For every prefix, `CooHybridLLMBenchmarks` fetches the top 10 **Dependency** suggestions and the top 10 **Baseline** suggestions using the same builders and case-sensitive prefix filter as the original benchmarks. It keeps Dependency order first, appends previously unseen Baseline names, and retains both source ranks for shared names. There are at most 20 unique hints. No expected answer is used to choose or reorder them.
-
-The merged hints become an additional context section **before the FIM prompt**, for example:
-
-```text
-<|file_sep|>heuristic-candidates
-"Ranked completion hints; suggestions may be incorrect.
-1. yourself [Dependency rank 1, Baseline rank 3]
-2. yourOtherMethod [Baseline rank 4]
-Continue the unfinished name at the cursor."
-```
-
-The rank values above are illustrative. Actual hints and ranks are saved in each snapshot's `heuristicCandidates` field and in the exact request prompt. The context slot is already supported by the default and custom templates, so hybrid hints reach the model even when a template relies on prepended context.
-
-The model then generates at most **one model token**, with the same options and exact-match scoring as the plain LLM. A hint containing the correct answer does not itself earn a successful score; the model must produce the correct continuation. Empty hint sets still make one model request. There is no reranking-only shortcut or heuristic fallback.
-
-Candidate fetching temporarily assigns the typed prefix to the AST node, just as the legacy benchmarks do, and restores it with `ensure:` even if fetching fails. It runs against the existing heuristic AST/environment; no method bodies are added to the model prompt. A correct name may legitimately appear among the hints. Heuristic failures are recorded and raised before contacting the model, rather than silently becoming an empty list.
-
-Inspect the hybrid's audit records with:
-
-```smalltalk
-(((comparison at: #messages) first first) results at: #hybridCompletion) records inspect.
-```
-
-Exports include `messages-1-hybrid.jsonl` and `variables-1-hybrid.jsonl` (the number identifies the package in a multi-package run). CSV, text, LaTeX and both PNGs include the hybrid as a separate strategy.
-
-An explicit runner can select the desired strategies with `others: #(heuristicsDependency llmCompletion hybridCompletion)`. To customize the hint sources on a standalone hybrid benchmark, send `heuristics:` **after** `kind:` with ordered associations from a label to a configured `CooStaticBenchmarksMessage` or `CooStaticBenchmarksVariables` instance. For example, to supply only Dependency hints:
-
-```smalltalk
-hybrid := CooHybridLLMBenchmarks new
-    kind: #messages;
-    heuristics: { #Dependency -> (CooStaticBenchmarksMessage new
-        builder: CooBenchRunnerMessage new dependencyBuilder;
-        yourself) };
-    scope: (CoBenchmarkPackage on:
-        (PackageOrganizer default packageNamed: 'NECompletion-Tests'));
-    run;
-    yourself.
 ```
 
 ## Model and template configuration
@@ -127,7 +85,7 @@ To change it, use `CooLLMClient default template: aString`. The supported litera
 
 ## Context snapshots and scoring
 
-For every callsite and prefix, `CooLLMContextSnapshot` captures class name, superclass, instance/class variable declarations, and the method source **before the completion**, followed by the typed prefix. Line endings are normalized to LF. The suffix is empty to model left-to-right typing. The plain snapshot sends neither the untyped target, subsequent source, nor the enclosing method body through a second context channel. Legitimate earlier source/declarations can naturally contain the same name. Snapshots contain no mutable AST references. The hybrid adds only the ranked hints described above.
+For every callsite and prefix, `CooLLMContextSnapshot` captures class name, superclass, instance/class variable declarations, and the method source **before the completion**, followed by the typed prefix. Line endings are normalized to LF. The suffix is empty to model left-to-right typing. It sends neither the untyped target, subsequent source, nor the enclosing method body through a second context channel. Legitimate earlier source/declarations can naturally contain the same name. Snapshots contain no mutable AST references and the LLM never modifies the AST.
 
 Each audit record retains the snapshot, exact rendered prompt, model/options/template, raw response and token counts, candidate, expected answer and rank. The expected answer and method identity are audit metadata only, not prompt inputs. Records are held in memory until export; long runs can consume substantial memory.
 
@@ -146,7 +104,7 @@ HTTP errors, missing models, malformed responses or a reported token count above
 runner := CooBenchRunnerMessage new
     package: (PackageOrganizer default packageNamed: 'NECompletion-Tests');
     baseline: #heuristicsBaseline;
-    others: #(heuristicsDependency llmCompletion hybridCompletion);
+    others: #(heuristicsDependency llmCompletion);
     yourself.
 runner run.
 ```
@@ -164,4 +122,4 @@ pharo --headless /path/to/copy.image st --quit scripts/smoke-llm.st
 
 `test.st` loads and runs the existing regression tests plus the new offline tests. `smoke-llm.st` calls real Ollama on a tiny fixture package and exports to `benchmark-smoke-results`; those plots are smoke-test measurements, not NECompletion results. Neither script saves the image. The baseline also exposes a `Tests` group.
 
-A full run sends one request per eligible callsite/prefix **for each model strategy**. In the validation image, `NECompletion-Tests` requires **6,998 message requests and 136 variable requests per strategy**, or **14,268 total** with both plain LLM and hybrid; the count depends on the image contents. Expect a substantially longer run than the heuristic benchmarks.
+A full run sends one request per eligible callsite/prefix. In the validation image, `NECompletion-Tests` requires **6,998 message requests and 136 variable requests**; the count depends on the image contents. Expect a substantially longer run than the heuristic benchmarks.

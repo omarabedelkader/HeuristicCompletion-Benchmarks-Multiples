@@ -14,14 +14,12 @@ comparison := CooBenchRunner compareMessagesAndVariablesFor: #('CooLLM-Smoke').
 files := CooBenchRunner export: comparison to: 'benchmark-smoke-results'.
 files do: [ :file | Stdio stdout nextPutAll: file fullName; lf ].
 #(messages variables) do: [ :kind |
-	| runner baseline |
+	| runner llm baseline |
 	runner := (comparison at: kind) first first.
+	llm := runner results at: #llmCompletion.
 	baseline := runner results at: #heuristicsBaseline.
-	#(llmCompletion hybridCompletion) do: [ :strategy |
-		| llm |
-		llm := runner results at: strategy.
-		2 to: 8 do: [ :prefix |
-			(llm totalEntriesPerPrefixSize: prefix) = (baseline totalEntriesPerPrefixSize: prefix)
-				ifFalse: [ self error: 'LLM and baseline populations differ' ] ].
-		Stdio stdout nextPutAll: kind asString; nextPutAll: ' '; nextPutAll: strategy asString; nextPutAll: ': ';
-			print: llm records size; nextPutAll: ' real one-token requests'; lf ] ].
+	2 to: 8 do: [ :prefix |
+		(llm totalEntriesPerPrefixSize: prefix) = (baseline totalEntriesPerPrefixSize: prefix)
+			ifFalse: [ self error: 'LLM and baseline populations differ' ] ].
+	Stdio stdout nextPutAll: kind asString; nextPutAll: ': ';
+		print: llm records size; nextPutAll: ' real one-token requests'; lf ].

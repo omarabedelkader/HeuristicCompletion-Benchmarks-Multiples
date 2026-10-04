@@ -63,9 +63,7 @@ CooLLMBenchmarks >> benchCallsite: node atPosition: ignoredPosition [
 			at: #expected put: target;
 			yourself.
 		records add: record.
-		generation := [
-			self enrichSnapshot: snapshot for: node.
-			client generateFor: snapshot ] on: Error do: [ :error |
+		generation := [ client generateFor: snapshot ] on: Error do: [ :error |
 			record at: #error put: error messageText.
 			error pass ].
 		"The response is an insertion at the cursor, not a replacement name.
@@ -78,12 +76,6 @@ CooLLMBenchmarks >> benchCallsite: node atPosition: ignoredPosition [
 		self trackCompletionResultsFor: target atIndex: rank withPrefix: prefix.
 		self logMemoryUsageSince: startMemory forPrefixSize: size.
 		self logExecutionTimeSince: startTime forPrefixSize: size ]
-]
-
-{ #category : 'benchmarks' }
-CooLLMBenchmarks >> enrichSnapshot: snapshot for: node [
-	"Extension point for model inputs; the plain LLM uses only source context."
-	^ snapshot
 ]
 
 { #category : 'exporting' }

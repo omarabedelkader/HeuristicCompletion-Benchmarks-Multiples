@@ -215,14 +215,3 @@ CooBenchRunner >> run [
 	{ baseline } , others do: [ :s |
 		results at: s put: (self perform: s) ]
 ]
-
-{ #category : 'LLM' }
-CooBenchRunner >> hybridCompletionFor: kind [
-	| benchmark |
-	benchmark := CooHybridLLMBenchmarks new
-		kind: kind;
-		scope: (CoBenchmarkPackage on: package);
-		yourself.
-	results ifNotNil: [ results at: #hybridCompletion put: benchmark ].
-	^ benchmark run; yourself
-]
