@@ -78,6 +78,27 @@ For a different set of packages:
 comparison := CooBenchRunner compareMessagesAndVariablesFor: #('NECompletion').
 ```
 
+To benchmark a random number of packages, replace `necTests` with `randomPackages:`:
+
+```smalltalk
+| comparison files |
+comparison := CooBenchRunner randomPackages: 10. "Change 10 to 20, etc."
+files := CooBenchRunner
+    export: comparison
+    to: '/Users/omar/Desktop/HeuristicCompletion-Benchmarks-Multiples/benchmark-results'.
+files inspect.
+```
+
+This selects exactly that many distinct loaded packages containing methods in the benchmark scope. The same selection is used for Methods, Classes and all six strategies. Empty packages and packages containing only methods outside that scope are excluded. The count must be a positive integer no larger than the eligible pool; invalid counts fail before inference.
+
+Inspect the selected names with `comparison at: #packageNames`, or see the available pool with `CooBenchRunner eligiblePackageNames`. For a repeatable selection on the same pool, use:
+
+```smalltalk
+comparison := CooBenchRunner randomPackages: 10 seed: 42.
+```
+
+The seed is retained as `#selectionSeed`. Re-exporting uses the saved results without selecting new packages. Calling `randomPackages:` again starts a new selection and benchmark run. Larger packages can take much longer to benchmark than small ones.
+
 ## Model and template configuration
 
 Configuration is separate from your editor's completion settings:

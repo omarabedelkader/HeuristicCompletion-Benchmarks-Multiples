@@ -116,6 +116,8 @@ CooPublicationTest >> testCorpusCountsUniqueEntitiesInActualBenchmarkScope [
 { #category : 'tests' }
 CooPublicationTest >> testExportWritesExactlyThreeArtifactsWithoutInference [
 	| comparison folder requests files latex points |
+	"Two full PNG encodes can exceed the default SUnit limit on a busy image."
+	self timeLimit: 1 minute.
 	comparison := self comparison.
 	requests := transport requests size.
 	points := CooBenchmarkChart performancePointsFor: comparison.
@@ -168,4 +170,63 @@ CooPublicationTest >> testMemoryAxisIncludesNegativeDeltasAndValuesAboveOneMB [
 	range := CooBenchmarkChart memoryRangeFor: { Dictionary newFrom: { #memoryMB -> 0 } }.
 	self assert: range first equals: 0.
 	self assert: range second > range first
+]
+
+{ #category : 'tests' }
+CooPublicationTest >> testRandomSelectionHasExactlyRequestedNumberOfDistinctPackages [
+	| candidates selection |
+	candidates := (1 to: 30) collect: [ :index | 'Package', index asString ].
+	#(10 20 30) do: [ :count |
+		selection := CooBenchRunner randomPackageNames: count
+			from: candidates , candidates using: (Random seed: 42).
+		self assert: selection size equals: count.
+		self assert: selection asSet size equals: count.
+		self assert: (selection allSatisfy: [ :name | candidates includes: name ]) ].
+	self assert: selection asSet equals: candidates asSet
+]
+
+{ #category : 'tests' }
+CooPublicationTest >> testSeededSelectionIsIndependentOfCandidateOrder [
+	| candidates first second |
+	candidates := (1 to: 30) collect: [ :index | 'Package', index asString ].
+	first := CooBenchRunner randomPackageNames: 10 from: candidates using: (Random seed: 42).
+	second := CooBenchRunner randomPackageNames: 10 from: candidates reversed using: (Random seed: 42).
+	self assert: first equals: second
+]
+
+{ #category : 'tests' }
+CooPublicationTest >> testInvalidPackageCountsFailBeforeInference [
+	#(0 -1 1.5 '10' nil 2) do: [ :count |
+		self should: [ CooBenchRunnerRandomTestStub randomPackages: count ] raise: Error ].
+	self assert: transport requests isEmpty
+]
+
+{ #category : 'tests' }
+CooPublicationTest >> testRandomComparisonUsesAndRetainsOneSelectionForBothKinds [
+	| comparison |
+	comparison := CooBenchRunnerRandomTestStub randomPackages: 1 seed: 42.
+	self assert: (comparison at: #packageNames) equals: #('CooPublication-Fixture').
+	self assert: (comparison at: #selectionSeed) equals: 42.
+	self assert: ((comparison at: #corpus) at: #packages) equals: 1.
+	#(messages variables) do: [ :kind |
+		self assert: ((comparison at: kind) first collect: [ :run | run package name ])
+			equals: (comparison at: #packageNames).
+		self assert: (comparison at: kind) first first results keys asSet
+			equals: CooBenchmarkChart publicationStrategies asSet ].
+	comparison := CooBenchRunnerRandomTestStub randomPackages: 1.
+	self assert: (comparison at: #packageNames) equals: #('CooPublication-Fixture')
+]
+
+{ #category : 'tests' }
+CooPublicationTest >> testEligiblePackagesExcludePackagesWithoutBenchmarkMethods [
+	| emptyClass eligible |
+	emptyClass := (Object << #CooEmptyPublicationFixture)
+		package: 'CooPublication-EmptyFixture'; install.
+	[
+		eligible := CooBenchRunner eligiblePackageNames.
+		self assert: (eligible includes: fixture package name).
+		self deny: (eligible includes: emptyClass package name)
+	] ensure: [
+		emptyClass removeFromSystem.
+		PackageOrganizer default removePackage: 'CooPublication-EmptyFixture' ]
 ]

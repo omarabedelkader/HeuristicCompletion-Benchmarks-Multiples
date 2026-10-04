@@ -40,11 +40,64 @@ CooBenchRunner class >> necTests [
 
 { #category : 'benchmarks' }
 CooBenchRunner class >> compareMessagesAndVariablesFor: packageNames [
+	| selectedNames |
+	selectedNames := packageNames asArray copy.
 	^ Dictionary new
-		at: #corpus put: (self corpusSummaryForPackageNames: packageNames);
-		at: #messages put: (CooBenchRunnerMessage allResultsFor: packageNames);
-		at: #variables put: (CooBenchRunnerVariables allResultsFor: packageNames);
+		at: #packageNames put: selectedNames;
+		at: #corpus put: (self corpusSummaryForPackageNames: selectedNames);
+		at: #messages put: (CooBenchRunnerMessage allResultsFor: selectedNames);
+		at: #variables put: (CooBenchRunnerVariables allResultsFor: selectedNames);
 		yourself
+]
+
+{ #category : 'benchmarks' }
+CooBenchRunner class >> randomPackages: count [
+	"Choose once, without replacement, for both kinds and all strategies."
+	^ self compareMessagesAndVariablesFor: (self
+		randomPackageNames: count
+		from: self eligiblePackageNames
+		using: Random new)
+]
+
+{ #category : 'benchmarks' }
+CooBenchRunner class >> randomPackages: count seed: seed [
+	"Repeat the selection with the same seed and eligible package names."
+	| comparison |
+	comparison := self compareMessagesAndVariablesFor: (self
+		randomPackageNames: count
+		from: self eligiblePackageNames
+		using: (Random seed: seed)).
+	comparison at: #selectionSeed put: seed.
+	^ comparison
+]
+
+{ #category : 'benchmarks' }
+CooBenchRunner class >> eligiblePackageNames [
+	"All loaded packages with methods in the actual benchmark traversal."
+	^ ((PackageOrganizer default packages select: [ :each |
+		self hasBenchmarkMethods: each ]) collect: #name) asSortedCollection asArray
+]
+
+{ #category : 'private' }
+CooBenchRunner class >> hasBenchmarkMethods: aPackage [
+	(CoBenchmarkPackage on: aPackage) methodsDo: [ :method | ^ true ].
+	^ false
+]
+
+{ #category : 'benchmarks' }
+CooBenchRunner class >> randomPackageNames: count from: packageNames using: random [
+	"Sorting makes seeded sampling independent of organizer enumeration order."
+	| remaining selected |
+	(count isInteger and: [ count > 0 ]) ifFalse: [
+		self error: 'Package count must be a positive integer' ].
+	remaining := packageNames asSet asSortedCollection asOrderedCollection.
+	count > remaining size ifTrue: [
+		self error: 'Requested ', count asString, ' packages, but only ',
+			remaining size asString, ' eligible packages are available' ].
+	selected := OrderedCollection new: count.
+	count timesRepeat: [
+		selected add: (remaining removeAt: (random nextInteger: remaining size)) ].
+	^ selected asArray
 ]
 
 { #category : 'exporting' }
