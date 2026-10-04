@@ -184,7 +184,7 @@ CooStaticBenchmarksVariables >> run [
 
 	scope methodsDo: [ :method |
 		method parseTree nodesDo: [ :node |
-			(node isVariable and: [ node name first isUppercase ]) 
+			(self class isClassCompletionNode: node)
 					ifTrue: [ self benchCallsite: node atPosition: node start ] ] ]
 ]
 
@@ -220,4 +220,14 @@ CooStaticBenchmarksVariables >> trackCompletionResultsFor: receiver atIndex: com
 { #category : 'enumerating' }
 CooStaticBenchmarksVariables >> valuesDo: aFullBlockClosure [ 
 	self shouldBeImplemented.
+]
+
+{ #category : 'testing' }
+CooStaticBenchmarksVariables class >> isClassCompletionNode: node [
+	"The publication category is Classes, so exclude non-class globals and
+	uppercase locals/class variables. Compiled method ASTs have resolved bindings."
+	^ node isVariable and: [
+		node name first isUppercase and: [
+			node binding notNil and: [
+				node isGlobalVariable and: [ node binding value isClass ] ] ] ]
 ]

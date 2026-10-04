@@ -1,6 +1,6 @@
 "
 Uses the same callsites, prefixes (2..8), exact-match target and MRR accounting
-as the legacy benchmarks. The sole candidate is typed prefix + generated text.
+as the heuristic benchmarks (class references for the variables category). The sole candidate is typed prefix + generated text.
 One model token may be a subword, so an incomplete name is correctly a miss.
 No AST mutation, autocomplete fallback, sampling loop or target-aware repair.
 "
@@ -44,7 +44,7 @@ CooLLMBenchmarks >> run [
 		method parseTree nodesDo: [ :node |
 			(kind = #messages
 				ifTrue: [ node isMessage ]
-				ifFalse: [ node isVariable and: [ node name first isUppercase ] ])
+				ifFalse: [ CooStaticBenchmarksVariables isClassCompletionNode: node ])
 				ifTrue: [ self benchCallsite: node atPosition: node start ] ] ]
 ]
 

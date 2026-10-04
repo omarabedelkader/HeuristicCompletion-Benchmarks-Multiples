@@ -1,6 +1,6 @@
 "
-Dependency-free Pharo PNG export: MRR versus prefix length, separate plots for
-messages and variables. Across packages, MRR is weighted by completion count.
+Publication tables and performance/latency scatter plot from retained runs.
+Across packages and prefixes, MRR and latency are weighted by observation count.
 Missing observations are gaps, never fabricated zero scores.
 "
 Class {
@@ -13,29 +13,21 @@ Class {
 
 { #category : 'exporting' }
 CooBenchmarkChart class >> export: comparison to: directory [
-	| folder files |
+	"Only publication artifacts. Everything is derived from retained results."
+	| folder files table corpus form graph |
+	table := self latexResultsTableFor: comparison.
+	corpus := self latexCorpusSummaryFor: (comparison at: #corpus).
+	form := self performanceFormFor: comparison.
 	folder := directory asFileReference ensureCreateDirectory.
 	files := OrderedCollection new.
-	#(messages variables) do: [ :kind |
-		| result runs png csv |
-		result := comparison at: kind.
-		runs := result first.
-		png := folder / (kind asString , '.png').
-		PNGReadWriter putForm: (self formFor: runs title: kind asString capitalized)
-			onFileNamed: png fullName.
-		files add: png.
-		csv := folder / (kind asString , '.csv').
-		csv writeStreamDo: [ :out | out truncate; nextPutAll: (self csvFor: runs) ].
-		files add: csv.
-		(folder / (kind asString , '.txt')) writeStreamDo: [ :out |
-			out truncate; nextPutAll: result second ].
-		(folder / (kind asString , '.tex')) writeStreamDo: [ :out |
-			out truncate; nextPutAll: result third ].
-		runs withIndexDo: [ :run :index |
-			(run results at: #llmCompletion ifAbsent: [ nil ]) ifNotNil: [ :llm |
-				files add: (llm exportRecordsTo:
-					(folder / (kind asString , '-' , index asString , '-llm.jsonl'))) ] ] ].
-	^ files
+	{ 'results-table.tex' -> table. 'dataset-summary.tex' -> corpus } do: [ :entry |
+		| file |
+		file := folder / entry key.
+		file writeStreamDo: [ :out | out truncate; nextPutAll: entry value ].
+		files add: file ].
+	graph := folder / 'performance.png'.
+	PNGReadWriter putForm: form onFileNamed: graph fullName.
+	^ { files first. graph. files second }
 ]
 
 { #category : 'data' }
@@ -44,7 +36,7 @@ CooBenchmarkChart class >> strategiesFor: runs [
 	keys := Set new.
 	runs do: [ :run | keys addAll: run results keys ].
 	ordered := OrderedCollection new.
-	#(heuristicsBaseline heuristicsDependency llmCompletion) do: [ :key |
+	(self publicationStrategies , #(llmCompletion)) do: [ :key |
 		(keys includes: key) ifTrue: [ ordered add: key. keys remove: key ] ].
 	ordered addAll: keys asSortedCollection.
 	^ ordered
@@ -69,7 +61,11 @@ CooBenchmarkChart class >> labelFor: strategy [
 	^ (Dictionary newFrom: {
 		#heuristicsBaseline -> 'Baseline'.
 		#heuristicsDependency -> 'Dependency'.
-		#llmCompletion -> 'LLM (1 model token)' })
+		#llmCompletion -> 'LLM (1 model token)'.
+		#llm05B -> '0.5B-LLM Completion'.
+		#llm15B -> '1.5B-LLM Completion'.
+		#llm3B -> '3B-LLM Completion'.
+		#llm7B -> '7B-LLM Completion' })
 		at: strategy ifAbsent: [ strategy asString ]
 ]
 
@@ -165,4 +161,180 @@ CooBenchmarkChart class >> text: text at: centerTop on: canvas font: font [
 	canvas drawString: text
 		at: (centerTop x - ((font widthOfString: text) / 2)) rounded @ centerTop y
 		font: font color: Color black
+]
+
+{ #category : 'data' }
+CooBenchmarkChart class >> publicationStrategies [
+	^ #(heuristicsBaseline heuristicsDependency llm05B llm15B llm3B llm7B)
+]
+
+{ #category : 'data' }
+CooBenchmarkChart class >> averageMrrFor: strategy runs: runs [
+	| count weighted |
+	count := 0.
+	weighted := 0.0.
+	runs do: [ :run |
+		(run results at: strategy ifAbsent: [ nil ]) ifNotNil: [ :benchmark |
+			2 to: 8 do: [ :prefix |
+				| n |
+				n := benchmark totalEntriesPerPrefixSize: prefix.
+				n > 0 ifTrue: [
+					count := count + n.
+					weighted := weighted + (n * (benchmark mmrForPrefixSize: prefix)) ] ] ] ].
+	^ count = 0 ifTrue: [ nil ] ifFalse: [ weighted / count ]
+]
+
+{ #category : 'data' }
+CooBenchmarkChart class >> performancePointFor: strategy runs: runs [
+	| count totalTime weighted |
+	count := 0.
+	totalTime := 0.0.
+	weighted := 0.0.
+	runs do: [ :run |
+		(run results at: strategy ifAbsent: [ nil ]) ifNotNil: [ :benchmark |
+			2 to: 8 do: [ :prefix |
+				| n |
+				n := benchmark totalEntriesPerPrefixSize: prefix.
+				n > 0 ifTrue: [
+					count := count + n.
+					totalTime := totalTime + (benchmark totalTimeForPrefix: prefix).
+					weighted := weighted + (n * (benchmark mmrForPrefixSize: prefix)) ] ] ] ].
+	^ Dictionary new
+		at: #strategy put: strategy;
+		at: #performance put: (count = 0 ifTrue: [ nil ] ifFalse: [ weighted / count ]);
+		at: #latencyMs put: (count = 0 ifTrue: [ nil ] ifFalse: [ totalTime / count ]);
+		at: #count put: count;
+		yourself
+]
+
+{ #category : 'data' }
+CooBenchmarkChart class >> performancePointsFor: comparison [
+	| points |
+	points := OrderedCollection new.
+	#(messages variables) do: [ :kind |
+		self publicationStrategies do: [ :strategy |
+			| point |
+			point := self performancePointFor: strategy runs: (comparison at: kind) first.
+			(point at: #count) > 0 ifTrue: [
+				point at: #kind put: kind.
+				points add: point ] ] ].
+	^ points
+]
+
+{ #category : 'exporting' }
+CooBenchmarkChart class >> latexResultsTableFor: comparison [
+	^ String streamContents: [ :out |
+		out nextPutAll: '\begin{table}[ht]'; lf;
+			nextPutAll: '\centering'; lf;
+			nextPutAll: '\caption{Completion performance by strategy and prefix length.}'; lf;
+			nextPutAll: '\renewcommand{\arraystretch}{1.3}'; lf;
+			nextPutAll: '\begin{tabular}{|c|l|c|c|c|c|c|c|c|c|}'; lf;
+			nextPutAll: '\hline'; lf;
+			nextPutAll: '\textbf{} & \textbf{Strategy} & \textbf{Average}'.
+		2 to: 8 do: [ :prefix | out nextPutAll: ' & \textbf{'; print: prefix; nextPutAll: '}' ].
+		out nextPutAll: ' \\'; lf; nextPutAll: '\hline'; lf.
+		#(messages variables) do: [ :kind |
+			| runs |
+			runs := (comparison at: kind) first.
+			out nextPutAll: '\multirow{6}{*}{\textbf{';
+				nextPutAll: (self labelForKind: kind); nextPutAll: '}}'; lf.
+			self publicationStrategies withIndexDo: [ :strategy :index |
+				out nextPutAll: '& '; nextPutAll: (self labelFor: strategy);
+					nextPutAll: ' & '; nextPutAll: (self formattedMrr: (self averageMrrFor: strategy runs: runs)).
+				2 to: 8 do: [ :prefix |
+					out nextPutAll: ' & '; nextPutAll:
+						(self formattedMrr: (self valueFor: strategy prefix: prefix runs: runs)) ].
+				out nextPutAll: ' \\'.
+				index < 6 ifTrue: [ out nextPutAll: ' \cline{2-10}' ].
+				out lf ].
+			out nextPutAll: '\hline'; lf ].
+		out nextPutAll: '\end{tabular}'; lf; nextPutAll: '\end{table}'; lf ]
+]
+
+{ #category : 'exporting' }
+CooBenchmarkChart class >> latexCorpusSummaryFor: corpus [
+	^ String streamContents: [ :out |
+		out nextPutAll: '\begin{table}[ht]'; lf;
+			nextPutAll: '\centering'; lf;
+			nextPutAll: '\caption{Analyzed benchmark corpus.}'; lf;
+			nextPutAll: '\begin{tabular}{|l|r|}'; lf;
+			nextPutAll: '\hline'; lf;
+			nextPutAll: '\textbf{Entity} & \textbf{Count} \\'; lf;
+			nextPutAll: '\hline'; lf.
+		#(packages classes methods) do: [ :entity |
+			out nextPutAll: entity asString capitalized; nextPutAll: ' & ';
+				print: (corpus at: entity); nextPutAll: ' \\'; lf ].
+		out nextPutAll: '\hline'; lf; nextPutAll: '\end{tabular}'; lf;
+			nextPutAll: '\end{table}'; lf ]
+]
+
+{ #category : 'private' }
+CooBenchmarkChart class >> formattedMrr: value [
+	^ value ifNil: [ '--' ] ifNotNil: [ value asFloat printShowingDecimalPlaces: 3 ]
+]
+
+{ #category : 'private' }
+CooBenchmarkChart class >> labelForKind: kind [
+	^ kind = #messages ifTrue: [ 'Methods' ] ifFalse: [ 'Classes' ]
+]
+
+{ #category : 'drawing' }
+CooBenchmarkChart class >> performanceFormFor: comparison [
+	| form canvas font points maximum label labelForm |
+	points := self performancePointsFor: comparison.
+	maximum := 1.0.
+	points do: [ :point | maximum := maximum max: (point at: #latencyMs) * 1.1 ].
+	form := Form extent: 1200 @ 1000 depth: 32.
+	form fillWhite.
+	canvas := form getCanvas.
+	font := LogicalFont familyName: StandardFonts defaultFont familyName pointSize: 18.
+	self text: 'Completion performance and latency' at: 660 @ 25 on: canvas font: font.
+	0 to: 5 do: [ :tick |
+		| x y |
+		x := 170 + (tick * 196).
+		y := 730 - (tick * 124).
+		canvas line: x @ 110 to: x @ 730 width: 1 color: Color lightGray.
+		canvas line: 170 @ y to: 1150 @ y width: 1 color: Color lightGray.
+		self text: (tick / 5.0 printShowingDecimalPlaces: 1) at: x @ 745 on: canvas font: font.
+		self text: (maximum * tick / 5.0 printShowingDecimalPlaces: 1)
+			at: 110 @ (y - 12) on: canvas font: font ].
+	canvas frameRectangle: (170 @ 110 corner: 1150 @ 730) width: 2 color: Color black.
+	self text: 'Completion performance (MRR)' at: 660 @ 790 on: canvas font: font.
+	label := 'Mean one-token completion latency (ms)'.
+	labelForm := Form extent: (font widthOfString: label) ceiling @ font height ceiling depth: 32.
+	labelForm fillWhite.
+	labelForm getCanvas drawString: label at: 0 @ 0 font: font color: Color black.
+	canvas drawImage: (labelForm rotateBy: #left centerAt: 0 @ 0) at: 20 @ 150.
+	points do: [ :point |
+		self performanceMarkerFor: (point at: #kind)
+			at: ((170 + ((point at: #performance) * 980)) @
+				(730 - ((point at: #latencyMs) / maximum * 620))) rounded
+			color: (self colorFor: (point at: #strategy)) on: canvas ].
+	self publicationStrategies withIndexDo: [ :strategy :index |
+		| x y |
+		x := 220 + (((index - 1) \\ 3) * 330).
+		y := 855 + (((index - 1) // 3) * 40).
+		canvas fillRectangle: (x @ y extent: 18 @ 18) color: (self colorFor: strategy).
+		canvas drawString: (self labelFor: strategy) at: (x + 28) @ (y - 5) font: font color: Color black ].
+	#(messages variables) withIndexDo: [ :kind :index |
+		| x |
+		x := 400 + ((index - 1) * 320).
+		self performanceMarkerFor: kind at: x @ 958 color: Color black on: canvas.
+		canvas drawString: (self labelForKind: kind) at: (x + 22) @ 944 font: font color: Color black ].
+	points ifEmpty: [ self text: 'No completion observations' at: 660 @ 410 on: canvas font: font ].
+	^ form
+]
+
+{ #category : 'drawing' }
+CooBenchmarkChart class >> colorFor: strategy [
+	^ { Color black. Color gray. Color blue. Color orange. Color green darker. Color magenta darker }
+		at: (self publicationStrategies indexOf: strategy)
+]
+
+{ #category : 'drawing' }
+CooBenchmarkChart class >> performanceMarkerFor: kind at: point color: color on: canvas [
+	kind = #messages ifTrue: [
+		^ canvas fillOval: (point - (8 @ 8) extent: 16 @ 16) color: color ].
+	canvas drawPolygon: { point + (0 @ -11). point + (-10 @ 8). point + (10 @ 8) }
+		color: Color white borderWidth: 3 borderColor: color
 ]

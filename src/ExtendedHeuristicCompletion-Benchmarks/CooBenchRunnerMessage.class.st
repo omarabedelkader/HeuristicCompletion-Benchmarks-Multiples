@@ -169,7 +169,7 @@ CooBenchRunnerMessage class >> runComparisonForPackages: aCol [
 			  self new
 				  package: pack;
 				  baseline: #heuristicsBaseline;
-				  others: { #heuristicsDependency. #llmCompletion };
+				  others: #(heuristicsDependency llm05B llm15B llm3B llm7B);
 				  run ]
 ]
 
@@ -284,4 +284,24 @@ CooBenchRunnerMessage >> heuristicsDependency [
 		             builder: builder;
 		             run.
 	^ benchmark
+]
+
+{ #category : 'LLM' }
+CooBenchRunnerMessage >> llm05B [
+	^ self llmCompletionFor: #messages model: (CooBenchRunner llmModels at: #llm05B)
+]
+
+{ #category : 'LLM' }
+CooBenchRunnerMessage >> llm15B [
+	^ self llmCompletionFor: #messages model: (CooBenchRunner llmModels at: #llm15B)
+]
+
+{ #category : 'LLM' }
+CooBenchRunnerMessage >> llm3B [
+	^ self llmCompletionFor: #messages model: (CooBenchRunner llmModels at: #llm3B)
+]
+
+{ #category : 'LLM' }
+CooBenchRunnerMessage >> llm7B [
+	^ self llmCompletionFor: #messages model: (CooBenchRunner llmModels at: #llm7B)
 ]

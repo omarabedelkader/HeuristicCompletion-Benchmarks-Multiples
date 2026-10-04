@@ -1,6 +1,6 @@
 # HeuristicCompletion-Benchmarks
 
-Compare the existing **Baseline** and **Dependency** strategies with **LLM (1 model token)**, for message selectors and uppercase variable/global names. The two heuristic implementations are unchanged.
+Compare **Baseline** and **Dependency** with four **one-token LLMs (0.5B, 1.5B, 3B and 7B)**, for message selectors (**Methods**) and class references (**Classes**). The heuristic candidate builders are unchanged; the Classes evaluation includes only uppercase globals whose resolved value is a class.
 
 ## Load
 
@@ -25,9 +25,18 @@ Metacello new
     load.
 ```
 
-## Run both benchmarks and generate the images
+## Run both benchmarks and export publication results
 
-Start your existing Ollama server with the model installed. The default connection is `http://localhost:11434`, using `pharo-llm/Qwen2.5-Coder-SFT:q4_K_M`, matching the Copilot reference project.
+Start your existing Ollama server with all four models installed. The default connection is `http://localhost:11434`. `CooBenchRunner class >> llmModels` centralizes these identifiers, verified against the local installation:
+
+| Strategy | Ollama model |
+| --- | --- |
+| `llm05B` | `pharo-llm/Qwen2.5-Coder-SFT:0.5B` |
+| `llm15B` | `pharo-llm/Qwen2.5-Coder-SFT:1.5B` |
+| `llm3B` | `pharo-llm/Qwen2.5-Coder-SFT:3b` |
+| `llm7B` | `pharo-llm/Qwen2.5-Coder-SFT:7b` |
+
+Change that method if your server uses different model names. Each strategy copies the default client and overrides only its model; it never changes the shared default client.
 
 Evaluate in a Playground:
 
@@ -40,15 +49,28 @@ files := CooBenchRunner
 files inspect.
 ```
 
-This runs all three strategies for **messages and variables**, then creates `messages.png` and `variables.png`: black lines with distinct markers, a legend, prefix lengths 2–8, and Average MRR on a 0–1 axis, like the reference screenshot. It also exports CSV, text, LaTeX and LLM JSONL audit records. Re-exporting the retained `comparison` does not run inference again. Files in the chosen output directory are replaced on re-export.
+This runs six strategies for each category, then writes exactly three publication artifacts:
 
-`comparison at: #messages` and `comparison at: #variables` each contain the existing three-element result format: `{ runners. text. latex }`. For example:
+- `results-table.tex`: twelve rows (Methods and Classes × six strategies), with observation-weighted MRR for Average and prefixes 2–8. Include `\usepackage{multirow}` in the containing LaTeX document.
+- `performance.png`: MRR on X and mean completion latency in milliseconds on Y. Strategy colors distinguish the six strategies; circles represent Methods and triangles represent Classes. There are twelve points when every strategy/category has observations.
+- `dataset-summary.tex`: unique packages, classes and methods in the analyzed corpus.
+
+The Average column and each scatter point weight all completion observations across packages and prefixes 2–8, rather than averaging per-prefix means. Latency uses existing benchmark timings, including request/context overhead and any model loading during a request. Missing observations are `--` in the table and omitted from the plot; they are not zero scores.
+
+Re-exporting the retained `comparison` does not run inference or recount a changed image. The three files are replaced on re-export. Use a fresh publication directory if it contains reports from the older exporter; unrelated or older files are not deleted automatically.
+
+`comparison at: #messages` and `comparison at: #variables` retain the existing three-element format: `{ runners. text. latex }`. `comparison at: #corpus` captures package/class/method counts before benchmarking. Corpus counts follow `CoBenchmarkPackage >> methodsDo:` in the loaded image, excluding anything outside its traversal (in the validation image, traits, extension methods and class-side methods). They count source entities, not completion attempts.
+
+Raw LLM records stay available in memory and can be explicitly exported outside the publication directory:
 
 ```smalltalk
-(((comparison at: #messages) first first) results at: #llmCompletion) records inspect.
+(((comparison at: #messages) first first) results at: #llm3B) records inspect.
+"Optional audit export:"
+(((comparison at: #messages) first first) results at: #llm3B)
+    exportRecordsTo: '/tmp/messages-3b.jsonl'.
 ```
 
-The existing `CooBenchRunnerMessage necTests` and `CooBenchRunnerVariables necTests` entry points still work and now include the LLM strategy. Other package examples also include it. The base-class `CooBenchRunner necTests` is the new convenience entry point for both kinds.
+`CooBenchRunnerMessage necTests` and `CooBenchRunnerVariables necTests` each run all six strategies for their category. The base-class `CooBenchRunner necTests` runs both categories and captures the corpus metadata needed for export.
 
 For a different set of packages:
 
@@ -62,16 +84,17 @@ Configuration is separate from your editor's completion settings:
 
 ```smalltalk
 CooLLMClient default
-    model: 'pharo-llm/Qwen2.5-Coder-SFT:3b-q4_K_M';
     baseUrl: 'http://localhost:11434';
     timeout: 120.
 ```
 
-To explicitly reuse an already loaded `pharo-copilot` connection (including its remote authentication), model and FIM template:
+To explicitly reuse an already loaded `pharo-copilot` connection (including its remote authentication) and FIM template:
 
 ```smalltalk
 CooLLMClient default useCopilotConnection.
 ```
+
+The four comparison strategies always select their models from `CooBenchRunner llmModels`, even when reusing a Copilot connection. The legacy `llmCompletion` selector remains available for explicitly running only `CooLLMClient default model`.
 
 The raw FIM protocol follows `CoPCOllamaClient` in the reference project. Each request sets `stream: false`, `raw: true`, `num_predict: 1`, `temperature: 0`, `seed: 42`, `num_ctx: 8192`, and the FIM stop sequences. No model is downloaded, editor setting changed, or heuristic fallback invoked. See the [Ollama generation API](https://docs.ollama.com/api/generate) and [generation parameters](https://docs.ollama.com/modelfile).
 
@@ -87,16 +110,16 @@ To change it, use `CooLLMClient default template: aString`. The supported litera
 
 For every callsite and prefix, `CooLLMContextSnapshot` captures class name, superclass, instance/class variable declarations, and the method source **before the completion**, followed by the typed prefix. Line endings are normalized to LF. The suffix is empty to model left-to-right typing. It sends neither the untyped target, subsequent source, nor the enclosing method body through a second context channel. Legitimate earlier source/declarations can naturally contain the same name. Snapshots contain no mutable AST references and the LLM never modifies the AST.
 
-Each audit record retains the snapshot, exact rendered prompt, model/options/template, raw response and token counts, candidate, expected answer and rank. The expected answer and method identity are audit metadata only, not prompt inputs. Records are held in memory until export; long runs can consume substantial memory.
+Each audit record retains the snapshot, exact rendered prompt, model/options/template, raw response and token counts, candidate, expected answer and rank. The expected answer and method identity are audit metadata only, not prompt inputs. Records are retained in memory; long runs can consume substantial memory.
 
 **One model token is not necessarily one complete Smalltalk name.** A token can contain only a subword, or whitespace/punctuation. The only candidate is `typedPrefix , generatedText`. It scores rank 1 only if it exactly matches the entire original selector/name; otherwise rank 0. There is no trimming, word extraction, resampling or hidden completion of the generated fragment. Consequently the LLM's MRR equals exact-match accuracy, while the heuristics can score at ranks 1–10.
 
-The legacy evaluation population is deliberately preserved:
+Evaluation population:
 
 - Prefix sizes are 2 through `min(name size, 8)`, including already complete short names. A model that keeps generating after a complete name can miss these cases.
-- Variables mean uppercase names (globals/classes), not all local variables.
+- The internal `#variables` category now means uppercase global references bound to classes. Other globals such as `Smalltalk` and `Transcript`, uppercase locals, and class variables are excluded. Both heuristics and all four LLMs use this same predicate. This is narrower than the previous uppercase-variable benchmark; rerun it before reporting Classes results.
 - Keyword-message targets are full concatenated selectors, e.g. `at:put:`. The simulated prefix can be `at:p`; the held-out arguments and later keywords are not copied into the prompt. This is the legacy selector-prefix task, not arbitrary code infilling.
-- Across multiple packages, chart MRR is weighted by callsite count at each prefix. Prefixes with no observations are gaps and blank CSV scores.
+- Across multiple packages, per-prefix MRR is weighted by callsite count. Prefixes with no observations are shown as `--`.
 
 HTTP errors, missing models, malformed responses or a reported token count above one raise an error rather than becoming misleading accuracy misses. A runner retains its completed heuristic results and partial LLM diagnostics when interrupted; retain an explicit runner if you need to inspect it after an error:
 
@@ -104,7 +127,7 @@ HTTP errors, missing models, malformed responses or a reported token count above
 runner := CooBenchRunnerMessage new
     package: (PackageOrganizer default packageNamed: 'NECompletion-Tests');
     baseline: #heuristicsBaseline;
-    others: #(heuristicsDependency llmCompletion);
+    others: #(heuristicsDependency llm05B llm15B llm3B llm7B);
     yourself.
 runner run.
 ```
@@ -120,6 +143,6 @@ pharo --headless /path/to/copy.image st --quit scripts/test.st
 pharo --headless /path/to/copy.image st --quit scripts/smoke-llm.st
 ```
 
-`test.st` loads and runs the existing regression tests plus the new offline tests. `smoke-llm.st` calls real Ollama on a tiny fixture package and exports to `benchmark-smoke-results`; those plots are smoke-test measurements, not NECompletion results. Neither script saves the image. The baseline also exposes a `Tests` group.
+`test.st` loads and runs the existing regression tests plus the new offline tests. `smoke-llm.st` calls all four real Ollama models on a tiny fixture package and exports the three artifacts to `benchmark-smoke-results`; those results are smoke-test measurements, not NECompletion results. Neither script saves the image. The baseline also exposes a `Tests` group.
 
-A full run sends one request per eligible callsite/prefix. In the validation image, `NECompletion-Tests` requires **6,998 message requests and 136 variable requests**; the count depends on the image contents. Expect a substantially longer run than the heuristic benchmarks.
+A full run sends one request per eligible callsite/prefix **for each of the four models**. The total depends on the image contents. The full NECompletion experiment can take substantially longer than the tiny smoke test.

@@ -8,7 +8,8 @@ Class {
 		'package',
 		'baseline',
 		'others',
-		'results'
+		'results',
+		'activeStrategy'
 	],
 	#category : 'ExtendedHeuristicCompletion-Benchmarks-Benchmarks',
 	#package : 'ExtendedHeuristicCompletion-Benchmarks',
@@ -32,7 +33,7 @@ CooBenchRunner class >> allResultsFor: aColOfPackageNames [
 
 { #category : 'examples' }
 CooBenchRunner class >> necTests [
-	"Both completion kinds, each containing the original strategies and the LLM.
+	"Both completion kinds, each containing two heuristics and four one-token LLMs.
 	Keep the answer to inspect or export without running the model again."
 	^ self compareMessagesAndVariablesFor: { 'NECompletion-Tests' }
 ]
@@ -40,6 +41,7 @@ CooBenchRunner class >> necTests [
 { #category : 'benchmarks' }
 CooBenchRunner class >> compareMessagesAndVariablesFor: packageNames [
 	^ Dictionary new
+		at: #corpus put: (self corpusSummaryForPackageNames: packageNames);
 		at: #messages put: (CooBenchRunnerMessage allResultsFor: packageNames);
 		at: #variables put: (CooBenchRunnerVariables allResultsFor: packageNames);
 		yourself
@@ -198,20 +200,67 @@ CooBenchRunner >> results [
 
 { #category : 'LLM' }
 CooBenchRunner >> llmCompletionFor: kind [
-	| benchmark |
+	^ self llmCompletionFor: kind model: CooLLMClient default model
+]
+
+{ #category : 'LLM' }
+CooBenchRunner >> llmCompletionFor: kind model: modelName [
+	| benchmark client |
+	client := CooLLMClient default copy model: modelName; yourself.
 	benchmark := CooLLMBenchmarks new
+		client: client;
 		kind: kind;
 		scope: (CoBenchmarkPackage on: package);
 		yourself.
-	"Retain partial diagnostics if an HTTP/server error interrupts this run."
-	results ifNotNil: [ results at: #llmCompletion put: benchmark ].
+	"Keep partial diagnostics under the strategy that actually failed."
+	activeStrategy ifNotNil: [ results at: activeStrategy put: benchmark ].
 	^ benchmark run; yourself
 ]
 
 { #category : 'accessing' }
 CooBenchRunner >> run [
-
 	results := Dictionary new.
-	{ baseline } , others do: [ :s |
-		results at: s put: (self perform: s) ]
+	[ { baseline } , others do: [ :strategy |
+		activeStrategy := strategy.
+		results at: strategy put: (self perform: strategy) ] ]
+		ensure: [ activeStrategy := nil ]
+]
+
+{ #category : 'LLM configuration' }
+CooBenchRunner class >> llmModels [
+	^ OrderedDictionary new
+		at: #llm05B put: 'pharo-llm/Qwen2.5-Coder-SFT:0.5B';
+		at: #llm15B put: 'pharo-llm/Qwen2.5-Coder-SFT:1.5B';
+		at: #llm3B put: 'pharo-llm/Qwen2.5-Coder-SFT:3b';
+		at: #llm7B put: 'pharo-llm/Qwen2.5-Coder-SFT:7b';
+		yourself
+]
+
+{ #category : 'benchmarks' }
+CooBenchRunner class >> corpusSummaryForPackageNames: packageNames [
+	"Count the same corpus traversed by CoBenchmarkPackage, once per entity.
+	Do not include trait or extension methods that the benchmark never visits."
+	| packages classes methods |
+	packages := (packageNames collect: [ :name |
+		PackageOrganizer default packageNamed: name ]) asSet.
+	classes := Set new.
+	methods := Set new.
+	packages do: [ :each |
+		classes addAll: (each definedClasses reject: #isTrait).
+		(CoBenchmarkPackage on: each) methodsDo: [ :method | methods add: method ] ].
+	^ Dictionary new
+		at: #packages put: packages size;
+		at: #classes put: classes size;
+		at: #methods put: methods size;
+		yourself
+]
+
+{ #category : 'exporting' }
+CooBenchRunner class >> latexResultsTableFor: comparison [
+	^ CooBenchmarkChart latexResultsTableFor: comparison
+]
+
+{ #category : 'exporting' }
+CooBenchRunner class >> latexCorpusSummaryFor: corpus [
+	^ CooBenchmarkChart latexCorpusSummaryFor: corpus
 ]
