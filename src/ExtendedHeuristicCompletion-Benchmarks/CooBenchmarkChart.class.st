@@ -1,6 +1,6 @@
 "
-Publication tables and performance/latency scatter plot from retained runs.
-Across packages and prefixes, MRR and latency are weighted by observation count.
+Publication tables and memory/latency scatter plot from retained runs.
+Across packages and prefixes, MRR, memory and latency are weighted by observation count.
 Missing observations are gaps, never fabricated zero scores.
 "
 Class {
@@ -186,9 +186,10 @@ CooBenchmarkChart class >> averageMrrFor: strategy runs: runs [
 
 { #category : 'data' }
 CooBenchmarkChart class >> performancePointFor: strategy runs: runs [
-	| count totalTime weighted |
+	| count totalTime totalMemory weighted |
 	count := 0.
 	totalTime := 0.0.
+	totalMemory := 0.0.
 	weighted := 0.0.
 	runs do: [ :run |
 		(run results at: strategy ifAbsent: [ nil ]) ifNotNil: [ :benchmark |
@@ -198,10 +199,12 @@ CooBenchmarkChart class >> performancePointFor: strategy runs: runs [
 				n > 0 ifTrue: [
 					count := count + n.
 					totalTime := totalTime + (benchmark totalTimeForPrefix: prefix).
+					totalMemory := totalMemory + (benchmark totalMemoryForPrefix: prefix).
 					weighted := weighted + (n * (benchmark mmrForPrefixSize: prefix)) ] ] ] ].
 	^ Dictionary new
 		at: #strategy put: strategy;
 		at: #performance put: (count = 0 ifTrue: [ nil ] ifFalse: [ weighted / count ]);
+		at: #memoryMB put: (count = 0 ifTrue: [ nil ] ifFalse: [ totalMemory / count / 1000000.0 ]);
 		at: #latencyMs put: (count = 0 ifTrue: [ nil ] ifFalse: [ totalTime / count ]);
 		at: #count put: count;
 		yourself
@@ -280,26 +283,30 @@ CooBenchmarkChart class >> labelForKind: kind [
 
 { #category : 'drawing' }
 CooBenchmarkChart class >> performanceFormFor: comparison [
-	| form canvas font points maximum label labelForm |
+	| form canvas font points maximum memoryRange memorySpan memoryDecimals label labelForm |
 	points := self performancePointsFor: comparison.
+	memoryRange := self memoryRangeFor: points.
+	memorySpan := memoryRange second - memoryRange first.
+	memoryDecimals := memorySpan < 0.01 ifTrue: [ 6 ] ifFalse: [ 3 ].
 	maximum := 1.0.
 	points do: [ :point | maximum := maximum max: (point at: #latencyMs) * 1.1 ].
 	form := Form extent: 1200 @ 1000 depth: 32.
 	form fillWhite.
 	canvas := form getCanvas.
 	font := LogicalFont familyName: StandardFonts defaultFont familyName pointSize: 18.
-	self text: 'Completion performance and latency' at: 660 @ 25 on: canvas font: font.
+	self text: 'Completion memory usage and latency' at: 660 @ 25 on: canvas font: font.
 	0 to: 5 do: [ :tick |
 		| x y |
 		x := 170 + (tick * 196).
 		y := 730 - (tick * 124).
 		canvas line: x @ 110 to: x @ 730 width: 1 color: Color lightGray.
 		canvas line: 170 @ y to: 1150 @ y width: 1 color: Color lightGray.
-		self text: (tick / 5.0 printShowingDecimalPlaces: 1) at: x @ 745 on: canvas font: font.
+		self text: (memoryRange first + (memorySpan * tick / 5.0) printShowingDecimalPlaces: memoryDecimals)
+			at: x @ 745 on: canvas font: font.
 		self text: (maximum * tick / 5.0 printShowingDecimalPlaces: 1)
 			at: 110 @ (y - 12) on: canvas font: font ].
 	canvas frameRectangle: (170 @ 110 corner: 1150 @ 730) width: 2 color: Color black.
-	self text: 'Completion performance (MRR)' at: 660 @ 790 on: canvas font: font.
+	self text: 'Mean Pharo memory change per completion (MB)' at: 660 @ 790 on: canvas font: font.
 	label := 'Mean one-token completion latency (ms)'.
 	labelForm := Form extent: (font widthOfString: label) ceiling @ font height ceiling depth: 32.
 	labelForm fillWhite.
@@ -307,7 +314,7 @@ CooBenchmarkChart class >> performanceFormFor: comparison [
 	canvas drawImage: (labelForm rotateBy: #left centerAt: 0 @ 0) at: 20 @ 150.
 	points do: [ :point |
 		self performanceMarkerFor: (point at: #kind)
-			at: ((170 + ((point at: #performance) * 980)) @
+			at: ((170 + (((point at: #memoryMB) - memoryRange first) / memorySpan * 980)) @
 				(730 - ((point at: #latencyMs) / maximum * 620))) rounded
 			color: (self colorFor: (point at: #strategy)) on: canvas ].
 	self publicationStrategies withIndexDo: [ :strategy :index |
@@ -337,4 +344,17 @@ CooBenchmarkChart class >> performanceMarkerFor: kind at: point color: color on:
 		^ canvas fillOval: (point - (8 @ 8) extent: 16 @ 16) color: color ].
 	canvas drawPolygon: { point + (0 @ -11). point + (-10 @ 8). point + (10 @ 8) }
 		color: Color white borderWidth: 3 borderColor: color
+]
+
+{ #category : 'data' }
+CooBenchmarkChart class >> memoryRangeFor: points [
+	"VM memory deltas may be zero or negative. Preserve them and include zero."
+	| minimum maximum |
+	minimum := 0.0.
+	maximum := 0.0.
+	points do: [ :point |
+		minimum := minimum min: (point at: #memoryMB).
+		maximum := maximum max: (point at: #memoryMB) ].
+	minimum = maximum ifTrue: [ ^ { 0.0. 1.0 } ].
+	^ { minimum * 1.1. maximum * 1.1 }
 ]

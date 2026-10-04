@@ -52,12 +52,12 @@ files inspect.
 This runs six strategies for each category, then writes exactly three publication artifacts:
 
 - `results-table.tex`: twelve rows (Methods and Classes × six strategies), with observation-weighted MRR for Average and prefixes 2–8. Include `\usepackage{multirow}` in the containing LaTeX document.
-- `performance.png`: MRR on X and mean completion latency in milliseconds on Y. Strategy colors distinguish the six strategies; circles represent Methods and triangles represent Classes. There are twelve points when every strategy/category has observations.
+- `performance.png`: mean Pharo memory change per completion in MB on X and mean completion latency in milliseconds on Y. Strategy colors distinguish the six strategies; circles represent Methods and triangles represent Classes. There are twelve points when every strategy/category has observations.
 - `dataset-summary.tex`: unique packages, classes and methods in the analyzed corpus.
 
-The Average column and each scatter point weight all completion observations across packages and prefixes 2–8, rather than averaging per-prefix means. Latency uses existing benchmark timings, including request/context overhead and any model loading during a request. Missing observations are `--` in the table and omitted from the plot; they are not zero scores.
+The Average column and each scatter point weight all completion observations across packages and prefixes 2–8, rather than averaging per-prefix means. Memory uses the sum of recorded byte deltas divided by the completion count and 1,000,000 (MB). These are changes in `Smalltalk vm memorySize`, not peak memory, allocation volume, or Ollama RAM/VRAM; zero and negative deltas are preserved. Latency uses existing benchmark timings, including request/context overhead and any model loading during a request. Missing observations are `--` in the table and omitted from the plot; they are not zero scores.
 
-Re-exporting the retained `comparison` does not run inference or recount a changed image. The three files are replaced on re-export. Use a fresh publication directory if it contains reports from the older exporter; unrelated or older files are not deleted automatically.
+Re-exporting the retained `comparison` does not run inference or recount a changed image. The three files are replaced on re-export. After loading updated code, regenerate the memory-axis graph with `CooBenchRunner export: comparison to: aDirectory` using your retained comparison; no new benchmark run is needed. Use a fresh publication directory if it contains reports from the older exporter; unrelated or older files are not deleted automatically.
 
 `comparison at: #messages` and `comparison at: #variables` retain the existing three-element format: `{ runners. text. latex }`. `comparison at: #corpus` captures package/class/method counts before benchmarking. Corpus counts follow `CoBenchmarkPackage >> methodsDo:` in the loaded image, excluding anything outside its traversal (in the validation image, traits, extension methods and class-side methods). They count source entities, not completion attempts.
 

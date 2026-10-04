@@ -68,13 +68,13 @@ CooPublicationTest >> testClassesExcludeNonClassGlobals [
 ]
 
 { #category : 'tests' }
-CooPublicationTest >> testAverageAndLatencyWeightObservationsAcrossPackagesAndPrefixes [
+CooPublicationTest >> testAverageMemoryAndLatencyWeightObservationsAcrossPackagesAndPrefixes [
 	| first second runs point |
 	first := CooStaticBenchmarksMessage new.
-	first trackCompletionResultsFor: 'size' atIndex: 1 withPrefix: 'si'; logTime: 10 forPrefix: 2.
-	3 timesRepeat: [ first trackCompletionResultsFor: 'size' atIndex: 0 withPrefix: 'siz'; logTime: 30 forPrefix: 3 ].
+	first trackCompletionResultsFor: 'size' atIndex: 1 withPrefix: 'si'; logTime: 10 forPrefix: 2; logMemory: 1000000 forPrefix: 2.
+	3 timesRepeat: [ first trackCompletionResultsFor: 'size' atIndex: 0 withPrefix: 'siz'; logTime: 30 forPrefix: 3; logMemory: 3000000 forPrefix: 3 ].
 	second := CooStaticBenchmarksMessage new.
-	second trackCompletionResultsFor: 'size' atIndex: 1 withPrefix: 'si'; logTime: 20 forPrefix: 2.
+	second trackCompletionResultsFor: 'size' atIndex: 1 withPrefix: 'si'; logTime: 20 forPrefix: 2; logMemory: 2000000 forPrefix: 2.
 	runs := { first. second } collect: [ :benchmark |
 		CooBenchRunnerTestBenchStub new results: (Dictionary newFrom: { #sample -> benchmark }); yourself ].
 	self assert: (CooBenchmarkChart averageMrrFor: #sample runs: runs) equals: 0.4.
@@ -83,6 +83,7 @@ CooPublicationTest >> testAverageAndLatencyWeightObservationsAcrossPackagesAndPr
 	point := CooBenchmarkChart performancePointFor: #sample runs: runs.
 	self assert: (point at: #performance) equals: 0.4.
 	self assert: (point at: #latencyMs) equals: 24.
+	self assert: (point at: #memoryMB) equals: 2.4.
 	self assert: (point at: #count) equals: 5
 ]
 
@@ -94,6 +95,7 @@ CooPublicationTest >> testMissingObservationsAreNotZeroMeasurements [
 	self assert: (point at: #count) equals: 0.
 	self assert: (point at: #performance) isNil.
 	self assert: (point at: #latencyMs) isNil.
+	self assert: (point at: #memoryMB) isNil.
 	self assert: (CooBenchmarkChart averageMrrFor: #llm3B runs: #()) isNil.
 	self assert: (CooBenchmarkChart performancePointsFor: comparison) isEmpty.
 	self assert: ((CooBenchRunner latexResultsTableFor: comparison) includesSubstring: '& -- & --').
@@ -146,4 +148,24 @@ CooPublicationTest >> testFailedModelRetainsItsOwnPartialDiagnostics [
 	self assert: (runner results includesKey: #llm3B).
 	self deny: (runner results includesKey: #llmCompletion).
 	self assert: ((runner results at: #llm3B) records first at: #error) equals: 'Unavailable model'
+]
+
+{ #category : 'tests' }
+CooPublicationTest >> testMemoryAxisIncludesNegativeDeltasAndValuesAboveOneMB [
+	| range benchmark run comparison point |
+	benchmark := CooStaticBenchmarksMessage new.
+	benchmark trackCompletionResultsFor: 'size' atIndex: 1 withPrefix: 'si';
+		logMemory: -2000000 forPrefix: 2; logTime: 5 forPrefix: 2.
+	run := CooBenchRunnerTestBenchStub new
+		results: (Dictionary newFrom: { #heuristicsBaseline -> benchmark }); yourself.
+	point := CooBenchmarkChart performancePointFor: #heuristicsBaseline runs: { run }.
+	self assert: (point at: #memoryMB) equals: -2.
+	range := CooBenchmarkChart memoryRangeFor: { point. Dictionary newFrom: { #memoryMB -> 8 } }.
+	self assert: range first < -2.
+	self assert: range second > 8.
+	comparison := Dictionary newFrom: { #messages -> { { run } }. #variables -> { #() } }.
+	self assert: (CooBenchmarkChart performanceFormFor: comparison) extent equals: 1200 @ 1000.
+	range := CooBenchmarkChart memoryRangeFor: { Dictionary newFrom: { #memoryMB -> 0 } }.
+	self assert: range first equals: 0.
+	self assert: range second > range first
 ]
