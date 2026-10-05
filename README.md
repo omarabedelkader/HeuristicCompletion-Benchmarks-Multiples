@@ -129,7 +129,7 @@ To change it, use `CooLLMClient default template: aString`. The supported litera
 
 ## Context snapshots and scoring
 
-For every callsite and prefix, `CooLLMContextSnapshot` captures class name, superclass, instance/class variable declarations, and the method source **before the completion**, followed by the typed prefix. Line endings are normalized to LF. The suffix is empty to model left-to-right typing. It sends neither the untyped target, subsequent source, nor the enclosing method body through a second context channel. Legitimate earlier source/declarations can naturally contain the same name. Snapshots contain no mutable AST references and the LLM never modifies the AST.
+For every callsite and prefix, `CooLLMContextSnapshot` captures class name, superclass, instance/class variable declarations, and the method source **before the completion**, followed by the typed prefix. The FIM suffix starts **after the original completion node**, excluding the held-out target text while preserving subsequent source. Both source parts are normalized to LF. Structural context contains no second copy of the enclosing method body. Legitimate surrounding source/declarations can naturally contain the same name. Snapshots use the `fim-structural-v1` context policy, contain no mutable AST references, and the LLM never modifies the AST. Rerun LM and hybrid benchmarks to measure this policy; existing prefix-only results are unchanged.
 
 Each audit record retains the snapshot, exact rendered prompt, model/options/template, raw response and token counts, candidate, expected answer and rank. The expected answer and method identity are audit metadata only, not prompt inputs. Records are retained in memory; long runs can consume substantial memory.
 
@@ -139,7 +139,7 @@ Evaluation population:
 
 - Prefix sizes are 2 through `min(name size, 8)`, including already complete short names. A model that keeps generating after a complete name can miss these cases.
 - The internal `#variables` category now means uppercase global references bound to classes. Other globals such as `Smalltalk` and `Transcript`, uppercase locals, and class variables are excluded. Both heuristics, all four LLMs and all four hybrids use this same predicate. This is narrower than the previous uppercase-variable benchmark; rerun it before reporting Classes results.
-- Keyword-message targets are full concatenated selectors, e.g. `at:put:`. The simulated prefix can be `at:p`; the held-out arguments and later keywords are not copied into the prompt. This is the legacy selector-prefix task, not arbitrary code infilling.
+- Keyword-message targets are full concatenated selectors, e.g. `at:put:`. The simulated prefix can be `at:p`; the held-out arguments and later keywords are not copied into the prompt. The suffix starts after the entire message node, including its arguments. This preserves the legacy selector-prefix task; faithful editor-style FIM would require an independent cursor offset and masking of held-out completion text.
 - Across multiple packages, per-prefix MRR is weighted by callsite count. Prefixes with no observations are shown as `--`.
 
 HTTP errors, missing models, malformed responses or a reported token count above one raise an error rather than becoming misleading accuracy misses. A runner retains its completed heuristic results and partial LM/hybrid diagnostics when interrupted; retain an explicit runner if you need to inspect it after an error:

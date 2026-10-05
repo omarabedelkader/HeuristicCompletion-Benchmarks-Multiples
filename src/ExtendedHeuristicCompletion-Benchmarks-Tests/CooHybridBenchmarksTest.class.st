@@ -138,14 +138,15 @@ CooHybridBenchmarksTest >> testWhitespaceAndExtraCodeAreInsertedVerbatim [
 ]
 
 { #category : 'tests' }
-CooHybridBenchmarksTest >> testMessageSnapshotIsIndependentAndDoesNotLeak [
+CooHybridBenchmarksTest >> testMessageSnapshotUsesFIMSuffixAndOmitsTargetAndCandidates [
 	| node |
 	node := self messageIn: 'example ^ self secretCompletion. HiddenAfterCursor new'.
 	builder names: #('secretHeuristicCandidate').
 	benchmark benchCallsite: node atPosition: node start.
 	transport requests do: [ :request |
 		self deny: ((request at: 'prompt') includesSubstring: 'secretCompletion').
-		self deny: ((request at: 'prompt') includesSubstring: 'HiddenAfterCursor').
+		self assert: ((request at: 'prompt') endsWith:
+			'<|fim_suffix|>. HiddenAfterCursor new<|fim_middle|>').
 		self deny: ((request at: 'prompt') includesSubstring: 'secretHeuristicCandidate').
 		self assert: ((request at: 'options') at: 'num_predict') equals: 1.
 		self assert: ((request at: 'options') at: 'temperature') equals: 0 ].
@@ -164,7 +165,8 @@ CooHybridBenchmarksTest >> testVariableSnapshotAndContextAndRestoration [
 	benchmark benchCallsite: node atPosition: node start.
 	transport requests do: [ :request |
 		self deny: ((request at: 'prompt') includesSubstring: 'OrderedCollection').
-		self deny: ((request at: 'prompt') includesSubstring: 'HiddenAfterCursor') ].
+		self assert: ((request at: 'prompt') endsWith:
+			'<|fim_suffix|> new. HiddenAfterCursor new<|fim_middle|>') ].
 	self assert: node name equals: 'OrderedCollection' 
 ]
 

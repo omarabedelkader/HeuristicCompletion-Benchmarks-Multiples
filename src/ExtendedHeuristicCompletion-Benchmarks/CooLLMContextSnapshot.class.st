@@ -1,7 +1,8 @@
 "
-A value snapshot at a simulated completion cursor. Never sends the held-out
-target, the rest of the method, or another copy of the method to the model.
-The suffix is deliberately empty: this benchmark models left-to-right typing.
+A value snapshot at a simulated completion cursor. The prefix ends with the
+typed selector/name prefix; the FIM suffix starts after the original target
+node, excluding its held-out text (including arguments for message nodes).
+Structural context contains no additional copy of the method body.
 "
 Class {
 	#name : 'CooLLMContextSnapshot',
@@ -13,7 +14,7 @@ Class {
 
 { #category : 'building' }
 CooLLMContextSnapshot class >> for: aNode prefix: aPrefix kind: aKind [
-	| method source start targetClass |
+	| method source start suffixStart targetClass |
 	method := aNode methodNode.
 	source := method source.
 	start := aNode isMessage
@@ -21,16 +22,20 @@ CooLLMContextSnapshot class >> for: aNode prefix: aPrefix kind: aKind [
 		ifFalse: [ aNode start ].
 	(start between: 1 and: source size) ifFalse: [
 		self error: 'Completion node has no valid source position' ].
+	suffixStart := aNode stop + 1.
 	targetClass := method methodClass.
 	^ Dictionary new
-		at: #contextPolicy put: 'prefix-only-structural-v1';
+		at: #contextPolicy put: 'fim-structural-v1';
 		at: #kind put: aKind;
 		at: #className put: targetClass name;
 		at: #methodSelector put: method selector asString;
 		at: #sourceStart put: start;
 		at: #prefix put: aPrefix copy;
 		at: #sourcePrefix put: (self normalize: (source first: start - 1) , aPrefix);
-		at: #suffix put: '';
+		at: #suffix put: (self normalize:
+			(suffixStart <= source size
+				ifTrue: [ source copyFrom: suffixStart to: source size ]
+				ifFalse: [ '' ]));
 		at: #context put: (self contextFor: targetClass);
 		yourself
 ]
@@ -38,7 +43,7 @@ CooLLMContextSnapshot class >> for: aNode prefix: aPrefix kind: aKind [
 { #category : 'building' }
 CooLLMContextSnapshot class >> contextFor: aClass [
 	"Structural context only. No method bodies, including the benchmarked method.
-	Declarations and source before the cursor may naturally mention the target."
+	Declarations and surrounding source may naturally mention the target."
 	^ String streamContents: [ :out |
 		out nextPutAll: '<|repo_name|>'; nextPutAll: aClass name; lf;
 			nextPutAll: '<|file_sep|>class-context'; lf;

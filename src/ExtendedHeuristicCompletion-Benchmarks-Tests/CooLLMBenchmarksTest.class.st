@@ -30,24 +30,27 @@ CooLLMBenchmarksTest >> snapshot [
 ]
 
 { #category : 'tests' }
-CooLLMBenchmarksTest >> testSnapshotDoesNotLeakTargetOrFollowingSource [
+CooLLMBenchmarksTest >> testSnapshotUsesFollowingSourceAsFIMSuffix [
 	| node snapshot prompt |
 	node := self messageIn: 'example ^ self secretCompletion. HiddenAfterCursor new'.
 	snapshot := CooLLMContextSnapshot for: node prefix: 'se' kind: #messages.
 	prompt := client promptFor: snapshot.
 	self assert: (snapshot at: #sourcePrefix) equals: 'example ^ self se'.
-	self assert: (snapshot at: #suffix) equals: ''.
+	self assert: (snapshot at: #contextPolicy) equals: 'fim-structural-v1'.
+	self assert: (snapshot at: #suffix) equals: '. HiddenAfterCursor new'.
 	self deny: (prompt includesSubstring: 'secretCompletion').
-	self deny: (prompt includesSubstring: 'HiddenAfterCursor').
+	self assert: (prompt includesSubstring:
+		'<|fim_prefix|>example ^ self se<|fim_suffix|>. HiddenAfterCursor new<|fim_middle|>').
 	self assert: node selector equals: #secretCompletion
 ]
 
 { #category : 'tests' }
 CooLLMBenchmarksTest >> testKeywordSnapshotMatchesLegacySelectorPrefix [
 	| node snapshot |
-	node := self messageIn: 'example ^ self at: secretArgument put: HiddenAfterCursor'.
+	node := self messageIn: 'example ^ self at: secretArgument put: HiddenAfterCursor. FollowingStatement new'.
 	snapshot := CooLLMContextSnapshot for: node prefix: 'at:p' kind: #messages.
 	self assert: (snapshot at: #sourcePrefix) equals: 'example ^ self at:p'.
+	self assert: (snapshot at: #suffix) equals: '. FollowingStatement new'.
 	self deny: ((client promptFor: snapshot) includesSubstring: 'secretArgument').
 	self deny: ((client promptFor: snapshot) includesSubstring: 'HiddenAfterCursor').
 	self assert: node selector equals: #at:put:
@@ -60,6 +63,7 @@ CooLLMBenchmarksTest >> testVariableSnapshotUsesExactSourceOffset [
 	node := tree allChildren detect: [ :each | each isVariable and: [ each name = 'OrderedCollection' ] ].
 	snapshot := CooLLMContextSnapshot for: node prefix: 'Ord' kind: #variables.
 	self assert: (snapshot at: #sourcePrefix) equals: 'example | local | local := Ord'.
+	self assert: (snapshot at: #suffix) equals: ' new. ^ local'.
 	self deny: ((client promptFor: snapshot) includesSubstring: 'OrderedCollection').
 	self assert: node name equals: 'OrderedCollection'
 ]
@@ -67,11 +71,14 @@ CooLLMBenchmarksTest >> testVariableSnapshotUsesExactSourceOffset [
 { #category : 'tests' }
 CooLLMBenchmarksTest >> testClassSideContextAndLineEndings [
 	| tree node snapshot |
-	tree := (OCParser parseMethod: 'example', String crlf, '^ self size')
+	tree := (OCParser parseMethod: 'example', String crlf, '^ self size.', String crlf,
+		'FollowingStatement new', String cr)
 		methodClass: self class class; yourself.
 	node := tree allChildren detect: #isMessage.
 	snapshot := CooLLMContextSnapshot for: node prefix: 'si' kind: #messages.
 	self assert: (snapshot at: #className) equals: self class class name.
+	self assert: (snapshot at: #sourcePrefix) equals: 'example', String lf, '^ self si'.
+	self assert: (snapshot at: #suffix) equals: '.', String lf, 'FollowingStatement new', String lf.
 	self deny: ((client promptFor: snapshot) includes: Character cr)
 ]
 
