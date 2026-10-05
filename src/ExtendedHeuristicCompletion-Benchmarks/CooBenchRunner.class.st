@@ -60,6 +60,19 @@ CooBenchRunner class >> randomPackages: count [
 ]
 
 { #category : 'benchmarks' }
+CooBenchRunner class >> randomPackagesForReranker: count [
+	"Run only the pure neural rerankers on the same packages for both kinds."
+	| packageNames |
+	packageNames := self
+		randomPackageNames: count
+		from: self eligiblePackageNames
+		using: Random new.
+	^ self
+		compareMessagesAndVariablesFor: packageNames
+		strategies: CooBenchmarkChart rerankerStrategies
+]
+
+{ #category : 'benchmarks' }
 CooBenchRunner class >> randomPackages: count seed: seed [
 	"Repeat the selection with the same seed and eligible package names."
 	| comparison |
@@ -104,6 +117,20 @@ CooBenchRunner class >> randomPackageNames: count from: packageNames using: rand
 CooBenchRunner class >> export: comparison to: directory [
 	"Export previously computed results; no new inference requests."
 	^ CooBenchmarkChart export: comparison to: directory
+]
+
+{ #category : 'exporting' }
+CooBenchRunner class >> exportReranker: comparison to: directory [
+	"Export the retained reranker table without running inference again."
+	| folder tableFile |
+	folder := directory asFileReference.
+	folder ensureCreateDirectory.
+	tableFile := folder / 'results-table-re-ranker.tex'.
+	tableFile writeStreamDo: [ :stream |
+		stream
+			truncate;
+			nextPutAll: (self latexResultsTableFor: comparison) ].
+	^ tableFile
 ]
 
 { #category : 'benchmarks' }

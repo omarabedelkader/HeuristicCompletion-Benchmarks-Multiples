@@ -405,6 +405,26 @@ smoke measurements establish integration, not a quality gain or general recall
 ceiling. Training a useful model and selecting thresholds requires the grouped
 real corpus experiment described above.
 
+### Reranker-only random-package experiment
+
+With a trained ranker service running, run the four pure neural rerankers on
+the same 40 randomly selected packages for both methods and variables:
+
+```smalltalk
+| comparison file |
+comparison := CooBenchRunner randomPackagesForReranker: 40.
+file := CooBenchRunner
+    exportReranker: comparison
+    to: '/Users/omar/Desktop/HeuristicCompletion-Benchmarks-Multiples/benchmark-results'.
+file inspect.
+```
+
+`CooBenchmarkChart rerankerStrategies` selects only `neuralRank10`,
+`neuralRank20`, `neuralRank30`, and `neuralRank50`, without adaptive LLM fallback.
+The exporter writes only `results-table-re-ranker.tex` and returns its file
+reference. It reuses the retained comparison without rerunning inference.
+The existing `randomPackages:` runner and generic `export:to:` are unchanged.
+
 ### The same publication table, with additional rows
 
 To keep exactly the six strategies in the original table and add the five new

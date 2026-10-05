@@ -415,6 +415,11 @@ CooBenchmarkChart class >> hybridSummaryFor: strategy runs: runs [
 ]
 
 { #category : 'data' }
+CooBenchmarkChart class >> rerankerStrategies [
+	^ #(neuralRank10 neuralRank20 neuralRank30 neuralRank50)
+]
+
+{ #category : 'data' }
 CooBenchmarkChart class >> rankingStrategies [
 	^ #(neuralRank10 neuralRank20 neuralRank30 neuralRank50 adaptiveRank05B)
 ]
