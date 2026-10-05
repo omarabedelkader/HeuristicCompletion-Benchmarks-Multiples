@@ -1,6 +1,6 @@
 # HeuristicCompletion-Benchmarks
 
-Compare **Baseline** and **Dependency** with four **one-token LLMs (0.5B, 1.5B, 3B and 7B)**, for message selectors (**Methods**) and class references (**Classes**). The heuristic candidate builders are unchanged; the Classes evaluation includes only uppercase globals whose resolved value is a class.
+Compare **Baseline** and **Dependency** with four **one-token LLMs (0.5B, 1.5B, 3B and 7B)**, for message selectors (**Methods**) and class references (**Classes**). Each model also has a **deterministic hybrid** combining its independent prediction with the Dependency heuristic top ten. The heuristic candidate builders are unchanged; the Classes evaluation includes only uppercase globals whose resolved value is a class.
 
 ## Load
 
@@ -49,10 +49,10 @@ files := CooBenchRunner
 files inspect.
 ```
 
-This runs six strategies for each category, then writes exactly three publication artifacts:
+This runs ten strategies for each category, then writes exactly three publication artifacts:
 
-- `results-table.tex`: twelve rows (Methods and Classes × six strategies), with observation-weighted MRR for Average and prefixes 2–8. Include `\usepackage{multirow}` in the containing LaTeX document.
-- `performance.png`: mean Pharo memory change per completion in MB on X and mean completion latency in milliseconds on Y. Strategy colors distinguish the six strategies; circles represent Methods and triangles represent Classes. There are twelve points when every strategy/category has observations.
+- `results-table.tex`: twenty rows (Methods and Classes × ten strategies), with observation-weighted MRR for Average and prefixes 2–8. Include `\usepackage{multirow}` in the containing LaTeX document.
+- `performance.png`: mean Pharo memory change per completion in MB on X and mean completion latency in milliseconds on Y. Strategy colors distinguish the ten strategies; circles represent Methods and triangles represent Classes. There are twenty points when every strategy/category has observations.
 - `dataset-summary.tex`: unique packages, classes and methods in the analyzed corpus.
 
 The Average column and each scatter point weight all completion observations across packages and prefixes 2–8, rather than averaging per-prefix means. Memory uses the sum of recorded byte deltas divided by the completion count and 1,000,000 (MB). These are changes in `Smalltalk vm memorySize`, not peak memory, allocation volume, or Ollama RAM/VRAM; zero and negative deltas are preserved. Latency uses existing benchmark timings, including request/context overhead and any model loading during a request. Missing observations are `--` in the table and omitted from the plot; they are not zero scores.
@@ -70,7 +70,7 @@ Raw LLM records stay available in memory and can be explicitly exported outside 
     exportRecordsTo: '/tmp/messages-3b.jsonl'.
 ```
 
-`CooBenchRunnerMessage necTests` and `CooBenchRunnerVariables necTests` each run all six strategies for their category. The base-class `CooBenchRunner necTests` runs both categories and captures the corpus metadata needed for export.
+`CooBenchRunnerMessage necTests` and `CooBenchRunnerVariables necTests` each run all ten strategies for their category. The base-class `CooBenchRunner necTests` runs both categories and captures the corpus metadata needed for export.
 
 For a different set of packages:
 
@@ -89,7 +89,7 @@ files := CooBenchRunner
 files inspect.
 ```
 
-This selects exactly that many distinct loaded packages containing methods in the benchmark scope. The same selection is used for Methods, Classes and all six strategies. Empty packages and packages containing only methods outside that scope are excluded. The count must be a positive integer no larger than the eligible pool; invalid counts fail before inference.
+This selects exactly that many distinct loaded packages containing methods in the benchmark scope. The same selection is used for Methods, Classes and all ten strategies. Empty packages and packages containing only methods outside that scope are excluded. The count must be a positive integer no larger than the eligible pool; invalid counts fail before inference.
 
 Inspect the selected names with `comparison at: #packageNames`, or see the available pool with `CooBenchRunner eligiblePackageNames`. For a repeatable selection on the same pool, use:
 
@@ -115,7 +115,7 @@ To explicitly reuse an already loaded `pharo-copilot` connection (including its 
 CooLLMClient default useCopilotConnection.
 ```
 
-The four comparison strategies always select their models from `CooBenchRunner llmModels`, even when reusing a Copilot connection. The legacy `llmCompletion` selector remains available for explicitly running only `CooLLMClient default model`.
+The four pure LM and four hybrid strategies always select their models from `CooBenchRunner llmModels`, even when reusing a Copilot connection. The legacy `llmCompletion` selector remains available for explicitly running only `CooLLMClient default model`.
 
 The raw FIM protocol follows `CoPCOllamaClient` in the reference project. Each request sets `stream: false`, `raw: true`, `num_predict: 1`, `temperature: 0`, `seed: 42`, `num_ctx: 8192`, and the FIM stop sequences. No model is downloaded, editor setting changed, or heuristic fallback invoked. See the [Ollama generation API](https://docs.ollama.com/api/generate) and [generation parameters](https://docs.ollama.com/modelfile).
 
@@ -138,22 +138,56 @@ Each audit record retains the snapshot, exact rendered prompt, model/options/tem
 Evaluation population:
 
 - Prefix sizes are 2 through `min(name size, 8)`, including already complete short names. A model that keeps generating after a complete name can miss these cases.
-- The internal `#variables` category now means uppercase global references bound to classes. Other globals such as `Smalltalk` and `Transcript`, uppercase locals, and class variables are excluded. Both heuristics and all four LLMs use this same predicate. This is narrower than the previous uppercase-variable benchmark; rerun it before reporting Classes results.
+- The internal `#variables` category now means uppercase global references bound to classes. Other globals such as `Smalltalk` and `Transcript`, uppercase locals, and class variables are excluded. Both heuristics, all four LLMs and all four hybrids use this same predicate. This is narrower than the previous uppercase-variable benchmark; rerun it before reporting Classes results.
 - Keyword-message targets are full concatenated selectors, e.g. `at:put:`. The simulated prefix can be `at:p`; the held-out arguments and later keywords are not copied into the prompt. This is the legacy selector-prefix task, not arbitrary code infilling.
 - Across multiple packages, per-prefix MRR is weighted by callsite count. Prefixes with no observations are shown as `--`.
 
-HTTP errors, missing models, malformed responses or a reported token count above one raise an error rather than becoming misleading accuracy misses. A runner retains its completed heuristic results and partial LLM diagnostics when interrupted; retain an explicit runner if you need to inspect it after an error:
+HTTP errors, missing models, malformed responses or a reported token count above one raise an error rather than becoming misleading accuracy misses. A runner retains its completed heuristic results and partial LM/hybrid diagnostics when interrupted; retain an explicit runner if you need to inspect it after an error:
 
 ```smalltalk
 runner := CooBenchRunnerMessage new
     package: (PackageOrganizer default packageNamed: 'NECompletion-Tests');
     baseline: #heuristicsBaseline;
-    others: #(heuristicsDependency llm05B llm15B llm3B llm7B);
+    others: #(heuristicsDependency llm05B llm15B llm3B llm7B hybrid05B hybrid15B hybrid3B hybrid7B);
     yourself.
 runner run.
 ```
 
 To run only the original strategies, use `others: #(heuristicsDependency)` in that example.
+
+## Deterministic hybrid and diagnostics
+
+`CooHybridBenchmarks` reuses the runners' `dependencyBuilder` configurations. For each original callsite and prefix it constructs the same `CooLLMContextSnapshot`, requests exactly one token, then temporarily changes the AST name to generate the heuristic top ten. `ensure:` restores the original name even if building or enumerating completions fails. The LM receives neither heuristic candidates nor the expected answer.
+
+Fusion is `unique([lmCandidate] + heuristicCandidates)[:10]`, preserving order. Nonempty generation becomes exactly `prefix , content`, including whitespace or extra code. **Empty generated text inserts nothing**, even when the prefix already equals the target. This is an explicit fusion abstention policy: the unchanged pure LM baseline still scores `prefix , ''` against the target. There is no validation, repair, retry, learned weighting or target-aware fallback.
+
+The additional strategies, in publication order after the pure LMs, are `hybrid05B`, `hybrid15B`, `hybrid3B`, and `hybrid7B`, labeled “Hybrid Dependency + [size]”. Each uses the corresponding entry in `CooBenchRunner llmModels`. Hybrid time and Pharo memory deltas cover the entire operation, including context creation, inference, heuristics, fusion and recordkeeping. External Ollama RAM/VRAM is not measured.
+
+Records include `expected`, `prefix`, `snapshot`, `generation`, `lmCandidate`, `heuristicCandidates`, `finalCandidates`, `heuristicRank`, `hybridRank`, `rank`, and `lmCorrect`. Failed operations retain an `error` and propagate the exception without scoring a miss. JSONL export works like the pure LM export:
+
+```smalltalk
+| runs hybrid summary |
+runs := (comparison at: #messages) first.
+hybrid := runs first results at: #hybrid05B.
+hybrid exportRecordsTo: '/tmp/hybrid-messages-05b.jsonl'.
+summary := CooBenchmarkChart hybridSummaryFor: #hybrid05B runs: runs.
+summary inspect.
+```
+
+The summary reports observation-weighted MRR, Accuracy@1/@3/@10, and these **overlapping diagnostic counts**:
+
+- `lmRescues`: heuristic miss, inserted LM candidate correct.
+- `lmPromotes`: heuristic target below rank one, LM correct.
+- `lmAgrees` / `duplicateLM`: the inserted LM candidate was already in the heuristic list (whether correct or wrong).
+- `lmHarms`: the target moves down, including eviction from rank ten to a miss.
+- `bothMiss`: neither candidate source contains the target.
+- `heuristicOnlySucceeds`: heuristics contain the target and the LM candidate is not correct.
+- `unchanged`: target rank is unchanged.
+- `unionHit` / `unionAccuracy`: target present in either candidate source **before truncation**. This is an analytical coverage upper bound, not a deployable strategy or an MRR score. Empty generation supplies no candidate under this fusion policy.
+
+Counts describe the target rank or candidate overlap; they are not mutually exclusive categories. Summaries exclude failed events from accuracy denominators and count them separately as `errors`. Missing accuracy is `nil`, not zero.
+
+For any strategy, including both baselines, use `CooBenchmarkChart accuracyAt: 3 for: #heuristicsDependency runs: runs`. Per-prefix top-k accuracy remains available through `accuracyForCompletionIndex: (1 to: 3) withPrefixSize: 2`. `CooBenchmarkChart performancePointFor: #hybrid05B runs: runs` supplies weighted mean latency and memory; compare with `#heuristicsDependency` to compute the added cost. The three default publication artifacts remain MRR, memory/latency, and corpus counts; diagnostic exports are explicit.
 
 ## Validation
 
@@ -164,6 +198,6 @@ pharo --headless /path/to/copy.image st --quit scripts/test.st
 pharo --headless /path/to/copy.image st --quit scripts/smoke-llm.st
 ```
 
-`test.st` loads and runs the existing regression tests plus the new offline tests. `smoke-llm.st` calls all four real Ollama models on a tiny fixture package and exports the three artifacts to `benchmark-smoke-results`; those results are smoke-test measurements, not NECompletion results. Neither script saves the image. The baseline also exposes a `Tests` group.
+`test.st` loads and runs the existing regression tests plus the new offline tests. `smoke-llm.st` calls all four real Ollama models for both pure LM and hybrid on a tiny fixture package and exports the three artifacts to `benchmark-smoke-results`; those results are smoke-test measurements, not NECompletion results. Neither script saves the image. The baseline also exposes a `Tests` group.
 
-A full run sends one request per eligible callsite/prefix **for each of the four models**. The total depends on the image contents. The full NECompletion experiment can take substantially longer than the tiny smoke test.
+A full run sends one request per eligible callsite/prefix **for each of the four models, once for pure LM and once for hybrid**. The total depends on the image contents. The full NECompletion experiment can take substantially longer than the tiny smoke test.

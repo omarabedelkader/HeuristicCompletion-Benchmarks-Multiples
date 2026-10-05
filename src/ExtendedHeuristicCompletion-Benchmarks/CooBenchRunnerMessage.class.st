@@ -169,7 +169,7 @@ CooBenchRunnerMessage class >> runComparisonForPackages: aCol [
 			  self new
 				  package: pack;
 				  baseline: #heuristicsBaseline;
-				  others: #(heuristicsDependency llm05B llm15B llm3B llm7B);
+				  others: #(heuristicsDependency llm05B llm15B llm3B llm7B hybrid05B hybrid15B hybrid3B hybrid7B);
 				  run ]
 ]
 
@@ -263,9 +263,8 @@ CooBenchRunnerMessage >> heuristicsBaseline [
 ]
 
 { #category : 'Heuristics' }
-CooBenchRunnerMessage >> heuristicsDependency [
-
-	| builder benchmark |
+CooBenchRunnerMessage >> dependencyBuilder [
+	| builder |
 	builder := CoASTHeuristicsResultSetBuilder new.
 	builder messagesHeuristic: (builder newHeuristicBuilder
 			 add: CoSelfMessageHeuristic new;
@@ -278,12 +277,16 @@ CooBenchRunnerMessage >> heuristicsDependency [
 			 add: CoDependencyMessageHeuristics new;
 			 add: CoUnknownMessageHeuristic new;
 			 build).
-	benchmark := CooStaticBenchmarksMessage new
-		             name: 'Dependency';
-		             scope: (CoBenchmarkPackage on: package);
-		             builder: builder;
-		             run.
-	^ benchmark
+	^ builder
+]
+
+{ #category : 'Heuristics' }
+CooBenchRunnerMessage >> heuristicsDependency [
+	^ CooStaticBenchmarksMessage new
+		name: 'Dependency';
+		scope: (CoBenchmarkPackage on: package);
+		builder: self dependencyBuilder;
+		run
 ]
 
 { #category : 'LLM' }
@@ -304,4 +307,32 @@ CooBenchRunnerMessage >> llm3B [
 { #category : 'LLM' }
 CooBenchRunnerMessage >> llm7B [
 	^ self llmCompletionFor: #messages model: (CooBenchRunner llmModels at: #llm7B)
+]
+
+{ #category : 'Hybrid' }
+CooBenchRunnerMessage >> hybrid05B [
+	^ self hybridCompletionFor: #messages
+		model: (CooBenchRunner llmModels at: #llm05B)
+		builder: self dependencyBuilder
+]
+
+{ #category : 'Hybrid' }
+CooBenchRunnerMessage >> hybrid15B [
+	^ self hybridCompletionFor: #messages
+		model: (CooBenchRunner llmModels at: #llm15B)
+		builder: self dependencyBuilder
+]
+
+{ #category : 'Hybrid' }
+CooBenchRunnerMessage >> hybrid3B [
+	^ self hybridCompletionFor: #messages
+		model: (CooBenchRunner llmModels at: #llm3B)
+		builder: self dependencyBuilder
+]
+
+{ #category : 'Hybrid' }
+CooBenchRunnerMessage >> hybrid7B [
+	^ self hybridCompletionFor: #messages
+		model: (CooBenchRunner llmModels at: #llm7B)
+		builder: self dependencyBuilder
 ]

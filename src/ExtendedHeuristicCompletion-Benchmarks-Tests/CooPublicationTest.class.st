@@ -99,7 +99,7 @@ CooPublicationTest >> testMissingObservationsAreNotZeroMeasurements [
 	self assert: (CooBenchmarkChart averageMrrFor: #llm3B runs: #()) isNil.
 	self assert: (CooBenchmarkChart performancePointsFor: comparison) isEmpty.
 	self assert: ((CooBenchRunner latexResultsTableFor: comparison) includesSubstring: '& -- & --').
-	self assert: (CooBenchmarkChart performanceFormFor: comparison) extent equals: 1200 @ 1000
+	self assert: (CooBenchmarkChart performanceFormFor: comparison) extent equals: 1200 @ 1150
 ]
 
 { #category : 'tests' }
@@ -121,7 +121,7 @@ CooPublicationTest >> testExportWritesExactlyThreeArtifactsWithoutInference [
 	comparison := self comparison.
 	requests := transport requests size.
 	points := CooBenchmarkChart performancePointsFor: comparison.
-	self assert: points size equals: 12.
+	self assert: points size equals: 20.
 	folder := FileLocator temp / ('coo-publication-' , UUID new asString).
 	[
 		2 timesRepeat: [
@@ -131,10 +131,10 @@ CooPublicationTest >> testExportWritesExactlyThreeArtifactsWithoutInference [
 			self assert: folder children size equals: 3.
 			self assert: transport requests size equals: requests ].
 		latex := (folder / 'results-table.tex') contents.
-		self assert: (latex lines select: [ :line | line beginsWith: '& ' ]) size equals: 12.
-		self assert: (latex includesSubstring: '\multirow{6}{*}{\textbf{Methods}}').
-		self assert: (latex includesSubstring: '\multirow{6}{*}{\textbf{Classes}}').
-		self assert: (PNGReadWriter formFromFileNamed: (folder / 'performance.png') fullName) extent equals: 1200 @ 1000.
+		self assert: (latex lines select: [ :line | line beginsWith: '& ' ]) size equals: 20.
+		self assert: (latex includesSubstring: '\multirow{10}{*}{\textbf{Methods}}').
+		self assert: (latex includesSubstring: '\multirow{10}{*}{\textbf{Classes}}').
+		self assert: (PNGReadWriter formFromFileNamed: (folder / 'performance.png') fullName) extent equals: 1200 @ 1150.
 		self assert: ((folder / 'dataset-summary.tex') contents includesSubstring: 'Packages & 1')
 	] ensure: [ folder ensureDeleteAll ]
 ]
@@ -166,7 +166,7 @@ CooPublicationTest >> testMemoryAxisIncludesNegativeDeltasAndValuesAboveOneMB [
 	self assert: range first < -2.
 	self assert: range second > 8.
 	comparison := Dictionary newFrom: { #messages -> { { run } }. #variables -> { #() } }.
-	self assert: (CooBenchmarkChart performanceFormFor: comparison) extent equals: 1200 @ 1000.
+	self assert: (CooBenchmarkChart performanceFormFor: comparison) extent equals: 1200 @ 1150.
 	range := CooBenchmarkChart memoryRangeFor: { Dictionary newFrom: { #memoryMB -> 0 } }.
 	self assert: range first equals: 0.
 	self assert: range second > range first
@@ -229,4 +229,57 @@ CooPublicationTest >> testEligiblePackagesExcludePackagesWithoutBenchmarkMethods
 	] ensure: [
 		emptyClass removeFromSystem.
 		PackageOrganizer default removePackage: 'CooPublication-EmptyFixture' ]
+]
+
+{ #category : 'tests' }
+CooPublicationTest >> testHybridsMatchPureLMRequestsAndAllStrategyPopulations [
+	| comparison |
+	comparison := self comparison.
+	#(messages variables) do: [ :kind |
+		| run dependency |
+		run := (comparison at: kind) first first.
+		dependency := run results at: #heuristicsDependency.
+		#(hybrid05B hybrid15B hybrid3B hybrid7B) with: #(llm05B llm15B llm3B llm7B) do: [ :hybridKey :lmKey |
+			| hybrid lm |
+			hybrid := run results at: hybridKey.
+			lm := run results at: lmKey.
+			self assert: hybrid records size equals: lm records size.
+			hybrid records with: lm records do: [ :h :l |
+				self assert: (h at: #snapshot) equals: (l at: #snapshot).
+				self assert: ((h at: #generation) at: #request) equals: ((l at: #generation) at: #request) ].
+			2 to: 8 do: [ :prefix |
+				self assert: (hybrid totalEntriesPerPrefixSize: prefix) equals: (dependency totalEntriesPerPrefixSize: prefix).
+				self assert: (hybrid totalEntriesPerPrefixSize: prefix) equals: (lm totalEntriesPerPrefixSize: prefix).
+				"Reusing dependency builders preserves the actual heuristic ranking too."
+				self assert: ((hybrid records select: [ :record | (record at: #prefix) size = prefix ])
+					count: [ :record | (record at: #heuristicRank) > 0 ])
+					equals: ((dependency accuracyForCompletionIndex: (1 to: 10) withPrefixSize: prefix)
+						* (dependency totalEntriesPerPrefixSize: prefix)) ] ] ]
+]
+
+{ #category : 'tests' }
+CooPublicationTest >> testFailedHybridRetainsPartialDiagnostics [
+	| runner |
+	transport responseBlock: [ :payload | self error: 'Unavailable model' ].
+	runner := CooBenchRunnerMessage new package: fixture package;
+		baseline: #heuristicsBaseline; others: #(hybrid3B); yourself.
+	self should: [ runner run ] raise: Error.
+	self assert: (runner results includesKey: #heuristicsBaseline).
+	self assert: ((runner results at: #hybrid3B) records first at: #error) equals: 'Unavailable model'.
+	self assert: ((runner results at: #hybrid3B) totalEntriesPerPrefixSize: 2) equals: 0
+]
+
+{ #category : 'tests' }
+CooPublicationTest >> testTopKAccuracyWeightsObservationsAndPreservesMissingData [
+	| first second runs |
+	first := CooStaticBenchmarksMessage new.
+	first trackCompletionResultsFor: 'size' atIndex: 1 withPrefix: 'si'.
+	second := CooStaticBenchmarksMessage new.
+	#(3 10 0) do: [ :rank | second trackCompletionResultsFor: 'size' atIndex: rank withPrefix: 'siz' ].
+	runs := { first. second } collect: [ :bench |
+		CooBenchRunnerTestBenchStub new results: (Dictionary newFrom: { #sample -> bench }); yourself ].
+	self assert: (CooBenchmarkChart accuracyAt: 1 for: #sample runs: runs) equals: 0.25.
+	self assert: (CooBenchmarkChart accuracyAt: 3 for: #sample runs: runs) equals: 0.5.
+	self assert: (CooBenchmarkChart accuracyAt: 10 for: #sample runs: runs) equals: 0.75.
+	self assert: (CooBenchmarkChart accuracyAt: 10 for: #missing runs: runs) isNil
 ]

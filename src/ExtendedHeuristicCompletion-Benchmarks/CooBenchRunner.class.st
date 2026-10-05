@@ -317,3 +317,15 @@ CooBenchRunner class >> latexResultsTableFor: comparison [
 CooBenchRunner class >> latexCorpusSummaryFor: corpus [
 	^ CooBenchmarkChart latexCorpusSummaryFor: corpus
 ]
+
+{ #category : 'Hybrid' }
+CooBenchRunner >> hybridCompletionFor: kind model: modelName builder: aBuilder [
+	| benchmark client |
+	client := CooLLMClient default copy model: modelName; yourself.
+	benchmark := CooHybridBenchmarks new
+		client: client; kind: kind;
+		scope: (CoBenchmarkPackage on: package);
+		builder: aBuilder; yourself.
+	activeStrategy ifNotNil: [ results at: activeStrategy put: benchmark ].
+	^ benchmark run; yourself
+]

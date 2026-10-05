@@ -234,7 +234,7 @@ CooBenchRunnerVariables class >> runComparisonForPackages: aCol [
 				  package: pack;
 				  baseline: #heuristicsBaseline;
 				  others:
-					  #(heuristicsDependency llm05B llm15B llm3B llm7B);
+					  #(heuristicsDependency llm05B llm15B llm3B llm7B hybrid05B hybrid15B hybrid3B hybrid7B);
 				  run ]
 ]
 
@@ -370,9 +370,8 @@ CooBenchRunnerVariables >> heuristicsBaseline [
 ]
 
 { #category : 'Heuristics' }
-CooBenchRunnerVariables >> heuristicsDependency [
-
-	| builder benchmark |
+CooBenchRunnerVariables >> dependencyBuilder [
+	| builder |
 	builder := CoASTHeuristicsResultSetBuilder new.
 	builder variablesHeuristic: (builder newHeuristicBuilder
 			 add: CoLocalScopeVariablesHeuristic new;
@@ -381,12 +380,16 @@ CooBenchRunnerVariables >> heuristicsDependency [
 			 add: (CoGlobalVariablesHeuristic new globalVariableFetcherClass: CoDependencyGlobalVariableFetcher);
 			 add: CoGlobalVariablesHeuristic new;
 			 build).
-	benchmark := CooStaticBenchmarksVariables new
-		             name: 'Dependency';
-		             scope: (CoBenchmarkPackage on: package);
-		             builder: builder;
-		             run.
-	^ benchmark
+	^ builder
+]
+
+{ #category : 'Heuristics' }
+CooBenchRunnerVariables >> heuristicsDependency [
+	^ CooStaticBenchmarksVariables new
+		name: 'Dependency';
+		scope: (CoBenchmarkPackage on: package);
+		builder: self dependencyBuilder;
+		run
 ]
 
 { #category : 'LLM' }
@@ -407,4 +410,32 @@ CooBenchRunnerVariables >> llm3B [
 { #category : 'LLM' }
 CooBenchRunnerVariables >> llm7B [
 	^ self llmCompletionFor: #variables model: (CooBenchRunner llmModels at: #llm7B)
+]
+
+{ #category : 'Hybrid' }
+CooBenchRunnerVariables >> hybrid05B [
+	^ self hybridCompletionFor: #variables
+		model: (CooBenchRunner llmModels at: #llm05B)
+		builder: self dependencyBuilder
+]
+
+{ #category : 'Hybrid' }
+CooBenchRunnerVariables >> hybrid15B [
+	^ self hybridCompletionFor: #variables
+		model: (CooBenchRunner llmModels at: #llm15B)
+		builder: self dependencyBuilder
+]
+
+{ #category : 'Hybrid' }
+CooBenchRunnerVariables >> hybrid3B [
+	^ self hybridCompletionFor: #variables
+		model: (CooBenchRunner llmModels at: #llm3B)
+		builder: self dependencyBuilder
+]
+
+{ #category : 'Hybrid' }
+CooBenchRunnerVariables >> hybrid7B [
+	^ self hybridCompletionFor: #variables
+		model: (CooBenchRunner llmModels at: #llm7B)
+		builder: self dependencyBuilder
 ]

@@ -65,7 +65,11 @@ CooBenchmarkChart class >> labelFor: strategy [
 		#llm05B -> '0.5B-LLM Completion'.
 		#llm15B -> '1.5B-LLM Completion'.
 		#llm3B -> '3B-LLM Completion'.
-		#llm7B -> '7B-LLM Completion' })
+		#llm7B -> '7B-LLM Completion'.
+		#hybrid05B -> 'Hybrid Dependency + 0.5B'.
+		#hybrid15B -> 'Hybrid Dependency + 1.5B'.
+		#hybrid3B -> 'Hybrid Dependency + 3B'.
+		#hybrid7B -> 'Hybrid Dependency + 7B' })
 		at: strategy ifAbsent: [ strategy asString ]
 ]
 
@@ -165,7 +169,8 @@ CooBenchmarkChart class >> text: text at: centerTop on: canvas font: font [
 
 { #category : 'data' }
 CooBenchmarkChart class >> publicationStrategies [
-	^ #(heuristicsBaseline heuristicsDependency llm05B llm15B llm3B llm7B)
+	^ #(heuristicsBaseline heuristicsDependency llm05B llm15B llm3B llm7B
+		hybrid05B hybrid15B hybrid3B hybrid7B)
 ]
 
 { #category : 'data' }
@@ -239,7 +244,8 @@ CooBenchmarkChart class >> latexResultsTableFor: comparison [
 		#(messages variables) do: [ :kind |
 			| runs |
 			runs := (comparison at: kind) first.
-			out nextPutAll: '\multirow{6}{*}{\textbf{';
+			out nextPutAll: '\multirow{'; print: self publicationStrategies size;
+				nextPutAll: '}{*}{\textbf{';
 				nextPutAll: (self labelForKind: kind); nextPutAll: '}}'; lf.
 			self publicationStrategies withIndexDo: [ :strategy :index |
 				out nextPutAll: '& '; nextPutAll: (self labelFor: strategy);
@@ -248,7 +254,7 @@ CooBenchmarkChart class >> latexResultsTableFor: comparison [
 					out nextPutAll: ' & '; nextPutAll:
 						(self formattedMrr: (self valueFor: strategy prefix: prefix runs: runs)) ].
 				out nextPutAll: ' \\'.
-				index < 6 ifTrue: [ out nextPutAll: ' \cline{2-10}' ].
+				index < self publicationStrategies size ifTrue: [ out nextPutAll: ' \cline{2-10}' ].
 				out lf ].
 			out nextPutAll: '\hline'; lf ].
 		out nextPutAll: '\end{tabular}'; lf; nextPutAll: '\end{table}'; lf ]
@@ -290,7 +296,7 @@ CooBenchmarkChart class >> performanceFormFor: comparison [
 	memoryDecimals := memorySpan < 0.01 ifTrue: [ 6 ] ifFalse: [ 3 ].
 	maximum := 1.0.
 	points do: [ :point | maximum := maximum max: (point at: #latencyMs) * 1.1 ].
-	form := Form extent: 1200 @ 1000 depth: 32.
+	form := Form extent: 1200 @ 1150 depth: 32.
 	form fillWhite.
 	canvas := form getCanvas.
 	font := LogicalFont familyName: StandardFonts defaultFont familyName pointSize: 18.
@@ -307,7 +313,7 @@ CooBenchmarkChart class >> performanceFormFor: comparison [
 			at: 110 @ (y - 12) on: canvas font: font ].
 	canvas frameRectangle: (170 @ 110 corner: 1150 @ 730) width: 2 color: Color black.
 	self text: 'Mean Pharo memory change per completion (MB)' at: 660 @ 790 on: canvas font: font.
-	label := 'Mean one-token completion latency (ms)'.
+	label := 'Mean completion latency (ms)'.
 	labelForm := Form extent: (font widthOfString: label) ceiling @ font height ceiling depth: 32.
 	labelForm fillWhite.
 	labelForm getCanvas drawString: label at: 0 @ 0 font: font color: Color black.
@@ -319,22 +325,23 @@ CooBenchmarkChart class >> performanceFormFor: comparison [
 			color: (self colorFor: (point at: #strategy)) on: canvas ].
 	self publicationStrategies withIndexDo: [ :strategy :index |
 		| x y |
-		x := 220 + (((index - 1) \\ 3) * 330).
-		y := 855 + (((index - 1) // 3) * 40).
+		x := 100 + (((index - 1) \\ 2) * 570).
+		y := 855 + (((index - 1) // 2) * 40).
 		canvas fillRectangle: (x @ y extent: 18 @ 18) color: (self colorFor: strategy).
 		canvas drawString: (self labelFor: strategy) at: (x + 28) @ (y - 5) font: font color: Color black ].
 	#(messages variables) withIndexDo: [ :kind :index |
 		| x |
 		x := 400 + ((index - 1) * 320).
-		self performanceMarkerFor: kind at: x @ 958 color: Color black on: canvas.
-		canvas drawString: (self labelForKind: kind) at: (x + 22) @ 944 font: font color: Color black ].
+		self performanceMarkerFor: kind at: x @ 1098 color: Color black on: canvas.
+		canvas drawString: (self labelForKind: kind) at: (x + 22) @ 1084 font: font color: Color black ].
 	points ifEmpty: [ self text: 'No completion observations' at: 660 @ 410 on: canvas font: font ].
 	^ form
 ]
 
 { #category : 'drawing' }
 CooBenchmarkChart class >> colorFor: strategy [
-	^ { Color black. Color gray. Color blue. Color orange. Color green darker. Color magenta darker }
+	^ { Color black. Color gray. Color blue. Color orange. Color green darker. Color magenta darker.
+		Color red. Color cyan darker. Color brown. Color purple }
 		at: (self publicationStrategies indexOf: strategy)
 ]
 
@@ -357,4 +364,42 @@ CooBenchmarkChart class >> memoryRangeFor: points [
 		maximum := maximum max: (point at: #memoryMB) ].
 	minimum = maximum ifTrue: [ ^ { 0.0. 1.0 } ].
 	^ { minimum * 1.1. maximum * 1.1 }
+]
+
+{ #category : 'data' }
+CooBenchmarkChart class >> accuracyAt: k for: strategy runs: runs [
+	| count hits |
+	(#(1 3 10) includes: k) ifFalse: [ self error: 'Expected k = 1, 3 or 10' ].
+	count := 0.
+	hits := 0.
+	runs do: [ :run |
+		(run results at: strategy ifAbsent: [ nil ]) ifNotNil: [ :benchmark |
+			2 to: 8 do: [ :prefix |
+				| n |
+				n := benchmark totalEntriesPerPrefixSize: prefix.
+				n > 0 ifTrue: [
+					count := count + n.
+					hits := hits + (n * (benchmark accuracyForCompletionIndex: (1 to: k) withPrefixSize: prefix)) ] ] ] ].
+	^ count = 0 ifTrue: [ nil ] ifFalse: [ hits / count asFloat ]
+]
+
+{ #category : 'data' }
+CooBenchmarkChart class >> hybridSummaryFor: strategy runs: runs [
+	"Aggregate counts, never per-package percentages. No additional inference."
+	| summary keys |
+	keys := #(count errors lmRescues lmPromotes lmAgrees duplicateLM lmHarms bothMiss heuristicOnlySucceeds unchanged unionHit).
+	summary := Dictionary new.
+	keys do: [ :key | summary at: key put: 0 ].
+	runs do: [ :run |
+		(run results at: strategy ifAbsent: [ nil ]) ifNotNil: [ :benchmark |
+			| diagnostic |
+			diagnostic := benchmark diagnosticSummary.
+			keys do: [ :key | summary at: key put: (summary at: key) + (diagnostic at: key) ] ] ].
+	summary at: #unionAccuracy put: ((summary at: #count) = 0
+		ifTrue: [ nil ] ifFalse: [ (summary at: #unionHit) / (summary at: #count) asFloat ]);
+		at: #mrr put: (self averageMrrFor: strategy runs: runs);
+		at: #accuracyAt1 put: (self accuracyAt: 1 for: strategy runs: runs);
+		at: #accuracyAt3 put: (self accuracyAt: 3 for: strategy runs: runs);
+		at: #accuracyAt10 put: (self accuracyAt: 10 for: strategy runs: runs).
+	^ summary
 ]
