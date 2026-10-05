@@ -329,3 +329,37 @@ CooBenchRunner >> hybridCompletionFor: kind model: modelName builder: aBuilder [
 	activeStrategy ifNotNil: [ results at: activeStrategy put: benchmark ].
 	^ benchmark run; yourself
 ]
+
+{ #category : 'ranking' }
+CooBenchRunner >> rankingCompletionFor: kind limit: k benchmarkClass: benchmarkClass [
+
+	| benchmark |
+	benchmark := benchmarkClass new
+		kind: kind; candidateLimit: k;
+		scope: (CoBenchmarkPackage on: package);
+		builder: self dependencyBuilder; yourself.
+	activeStrategy ifNotNil: [ results at: activeStrategy put: benchmark ].
+	^ benchmark run; yourself
+]
+
+{ #category : 'benchmarks' }
+CooBenchRunner class >> compareMessagesAndVariablesFor: packageNames strategies: strategies [
+	"Opt-in comparison on identical packages, with the requested publication rows."
+	| selectedNames ordered comparison packages |
+	ordered := CooBenchmarkChart validatePublicationStrategies: strategies.
+	selectedNames := packageNames asArray copy.
+	packages := selectedNames collect: [ :packageName | PackageOrganizer default packageNamed: packageName ].
+	comparison := Dictionary new
+		at: #packageNames put: selectedNames;
+		at: #publicationStrategies put: ordered;
+		at: #corpus put: (self corpusSummaryForPackageNames: selectedNames); yourself.
+	{ #messages -> CooBenchRunnerMessage. #variables -> CooBenchRunnerVariables } do: [ :entry |
+		| runs |
+		runs := packages collect: [ :package |
+			entry value new package: package; baseline: ordered first;
+				others: ordered allButFirst; run; yourself ].
+		comparison at: entry key put: {
+			runs. self stringResultForABenchCollection: runs.
+			self latexTableResultForABenchCollection: runs } ].
+	^ comparison
+]

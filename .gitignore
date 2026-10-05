@@ -37,3 +37,8 @@ github-*.zip
 # Generated benchmark reports (regenerate from retained runs)
 /benchmark-results/
 /benchmark-smoke-results/
+/benchmark-ranking-smoke-results/
+/benchmark-all-strategies-smoke-results/
+/ranking-models/
+__pycache__/
+.venv/

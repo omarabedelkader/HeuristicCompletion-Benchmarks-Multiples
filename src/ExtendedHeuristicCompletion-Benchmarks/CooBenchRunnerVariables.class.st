@@ -439,3 +439,33 @@ CooBenchRunnerVariables >> hybrid7B [
 		model: (CooBenchRunner llmModels at: #llm7B)
 		builder: self dependencyBuilder
 ]
+
+{ #category : 'ranking' }
+CooBenchRunnerVariables >> neuralRank10 [
+	^ self rankingCompletionFor: #variables limit: 10 benchmarkClass: CooNeuralRerankBenchmarks
+]
+
+{ #category : 'ranking' }
+CooBenchRunnerVariables >> neuralRank20 [
+	^ self rankingCompletionFor: #variables limit: 20 benchmarkClass: CooNeuralRerankBenchmarks
+]
+
+{ #category : 'ranking' }
+CooBenchRunnerVariables >> neuralRank30 [
+	^ self rankingCompletionFor: #variables limit: 30 benchmarkClass: CooNeuralRerankBenchmarks
+]
+
+{ #category : 'ranking' }
+CooBenchRunnerVariables >> neuralRank50 [
+	^ self rankingCompletionFor: #variables limit: 50 benchmarkClass: CooNeuralRerankBenchmarks
+]
+
+{ #category : 'ranking' }
+CooBenchRunnerVariables >> candidateRecall [
+	^ self rankingCompletionFor: #variables limit: 50 benchmarkClass: CooCandidateRecallBenchmarks
+]
+
+{ #category : 'ranking' }
+CooBenchRunnerVariables >> adaptiveRank05B [
+	^ self rankingCompletionFor: #variables limit: 30 benchmarkClass: CooAdaptiveHybridBenchmarks
+]

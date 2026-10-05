@@ -69,7 +69,12 @@ CooBenchmarkChart class >> labelFor: strategy [
 		#hybrid05B -> 'Hybrid Dependency + 0.5B'.
 		#hybrid15B -> 'Hybrid Dependency + 1.5B'.
 		#hybrid3B -> 'Hybrid Dependency + 3B'.
-		#hybrid7B -> 'Hybrid Dependency + 7B' })
+		#hybrid7B -> 'Hybrid Dependency + 7B'.
+		#neuralRank10 -> 'NeuralRank-10'.
+		#neuralRank20 -> 'NeuralRank-20'.
+		#neuralRank30 -> 'NeuralRank-30'.
+		#neuralRank50 -> 'NeuralRank-50'.
+		#adaptiveRank05B -> 'AdaptiveRank + 0.5B' })
 		at: strategy ifAbsent: [ strategy asString ]
 ]
 
@@ -220,7 +225,7 @@ CooBenchmarkChart class >> performancePointsFor: comparison [
 	| points |
 	points := OrderedCollection new.
 	#(messages variables) do: [ :kind |
-		self publicationStrategies do: [ :strategy |
+		(self publicationStrategiesFor: comparison) do: [ :strategy |
 			| point |
 			point := self performancePointFor: strategy runs: (comparison at: kind) first.
 			(point at: #count) > 0 ifTrue: [
@@ -231,6 +236,8 @@ CooBenchmarkChart class >> performancePointsFor: comparison [
 
 { #category : 'exporting' }
 CooBenchmarkChart class >> latexResultsTableFor: comparison [
+	| strategies |
+	strategies := self publicationStrategiesFor: comparison.
 	^ String streamContents: [ :out |
 		out nextPutAll: '\begin{table}[ht]'; lf;
 			nextPutAll: '\centering'; lf;
@@ -244,17 +251,17 @@ CooBenchmarkChart class >> latexResultsTableFor: comparison [
 		#(messages variables) do: [ :kind |
 			| runs |
 			runs := (comparison at: kind) first.
-			out nextPutAll: '\multirow{'; print: self publicationStrategies size;
+			out nextPutAll: '\multirow{'; print: strategies size;
 				nextPutAll: '}{*}{\textbf{';
 				nextPutAll: (self labelForKind: kind); nextPutAll: '}}'; lf.
-			self publicationStrategies withIndexDo: [ :strategy :index |
+			strategies withIndexDo: [ :strategy :index |
 				out nextPutAll: '& '; nextPutAll: (self labelFor: strategy);
 					nextPutAll: ' & '; nextPutAll: (self formattedMrr: (self averageMrrFor: strategy runs: runs)).
 				2 to: 8 do: [ :prefix |
 					out nextPutAll: ' & '; nextPutAll:
 						(self formattedMrr: (self valueFor: strategy prefix: prefix runs: runs)) ].
 				out nextPutAll: ' \\'.
-				index < self publicationStrategies size ifTrue: [ out nextPutAll: ' \cline{2-10}' ].
+				index < strategies size ifTrue: [ out nextPutAll: ' \cline{2-10}' ].
 				out lf ].
 			out nextPutAll: '\hline'; lf ].
 		out nextPutAll: '\end{tabular}'; lf; nextPutAll: '\end{table}'; lf ]
@@ -289,14 +296,16 @@ CooBenchmarkChart class >> labelForKind: kind [
 
 { #category : 'drawing' }
 CooBenchmarkChart class >> performanceFormFor: comparison [
-	| form canvas font points maximum memoryRange memorySpan memoryDecimals label labelForm |
+	| form canvas font points maximum memoryRange memorySpan memoryDecimals label labelForm strategies extraHeight |
+	strategies := self publicationStrategiesFor: comparison.
+	extraHeight := (((strategies size + 1) // 2) - 5 max: 0) * 40.
 	points := self performancePointsFor: comparison.
 	memoryRange := self memoryRangeFor: points.
 	memorySpan := memoryRange second - memoryRange first.
 	memoryDecimals := memorySpan < 0.01 ifTrue: [ 6 ] ifFalse: [ 3 ].
 	maximum := 1.0.
 	points do: [ :point | maximum := maximum max: (point at: #latencyMs) * 1.1 ].
-	form := Form extent: 1200 @ 1150 depth: 32.
+	form := Form extent: 1200 @ (1150 + extraHeight) depth: 32.
 	form fillWhite.
 	canvas := form getCanvas.
 	font := LogicalFont familyName: StandardFonts defaultFont familyName pointSize: 18.
@@ -323,7 +332,7 @@ CooBenchmarkChart class >> performanceFormFor: comparison [
 			at: ((170 + (((point at: #memoryMB) - memoryRange first) / memorySpan * 980)) @
 				(730 - ((point at: #latencyMs) / maximum * 620))) rounded
 			color: (self colorFor: (point at: #strategy)) on: canvas ].
-	self publicationStrategies withIndexDo: [ :strategy :index |
+	strategies withIndexDo: [ :strategy :index |
 		| x y |
 		x := 100 + (((index - 1) \\ 2) * 570).
 		y := 855 + (((index - 1) // 2) * 40).
@@ -332,8 +341,8 @@ CooBenchmarkChart class >> performanceFormFor: comparison [
 	#(messages variables) withIndexDo: [ :kind :index |
 		| x |
 		x := 400 + ((index - 1) * 320).
-		self performanceMarkerFor: kind at: x @ 1098 color: Color black on: canvas.
-		canvas drawString: (self labelForKind: kind) at: (x + 22) @ 1084 font: font color: Color black ].
+		self performanceMarkerFor: kind at: x @ (1098 + extraHeight) color: Color black on: canvas.
+		canvas drawString: (self labelForKind: kind) at: (x + 22) @ (1084 + extraHeight) font: font color: Color black ].
 	points ifEmpty: [ self text: 'No completion observations' at: 660 @ 410 on: canvas font: font ].
 	^ form
 ]
@@ -341,8 +350,9 @@ CooBenchmarkChart class >> performanceFormFor: comparison [
 { #category : 'drawing' }
 CooBenchmarkChart class >> colorFor: strategy [
 	^ { Color black. Color gray. Color blue. Color orange. Color green darker. Color magenta darker.
-		Color red. Color cyan darker. Color brown. Color purple }
-		at: (self publicationStrategies indexOf: strategy)
+		Color red. Color cyan darker. Color brown. Color purple.
+		Color blue darker. Color orange darker. Color green. Color magenta. Color cyan }
+		at: ((self publicationStrategies , self rankingStrategies) indexOf: strategy)
 ]
 
 { #category : 'drawing' }
@@ -402,4 +412,32 @@ CooBenchmarkChart class >> hybridSummaryFor: strategy runs: runs [
 		at: #accuracyAt3 put: (self accuracyAt: 3 for: strategy runs: runs);
 		at: #accuracyAt10 put: (self accuracyAt: 10 for: strategy runs: runs).
 	^ summary
+]
+
+{ #category : 'data' }
+CooBenchmarkChart class >> rankingStrategies [
+	^ #(neuralRank10 neuralRank20 neuralRank30 neuralRank50 adaptiveRank05B)
+]
+
+{ #category : 'data' }
+CooBenchmarkChart class >> validatePublicationStrategies: strategies [
+	(strategies isEmpty or: [ strategies asSet size ~= strategies size ]) ifTrue: [
+		self error: 'Choose a nonempty list of distinct publication strategies' ].
+	strategies do: [ :strategy |
+		((self publicationStrategies , self rankingStrategies) includes: strategy) ifFalse: [
+			self error: 'Unknown publication strategy: ', strategy asString ] ].
+	^ strategies asArray
+]
+
+{ #category : 'data' }
+CooBenchmarkChart class >> publicationStrategiesFor: comparison [
+	"Old comparisons retain their exact layout. Append known ranking results
+	when present, or honor an explicit validated row list. Never run inference."
+	| present |
+	(comparison includesKey: #publicationStrategies) ifTrue: [
+		^ self validatePublicationStrategies: (comparison at: #publicationStrategies) ].
+	present := Set new.
+	#(messages variables) do: [ :kind |
+		(comparison at: kind) first do: [ :run | present addAll: run results keys ] ].
+	^ self publicationStrategies , (self rankingStrategies select: [ :key | present includes: key ])
 ]

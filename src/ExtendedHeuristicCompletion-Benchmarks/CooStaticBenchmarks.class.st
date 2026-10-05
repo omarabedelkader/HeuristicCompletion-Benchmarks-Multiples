@@ -72,7 +72,8 @@ Class {
 		'builder',
 		'completionTimes',
 		'memoryUsages',
-		'name'
+		'name',
+		'latencySamples'
 	],
 	#category : 'ExtendedHeuristicCompletion-Benchmarks-Benchmarks',
 	#package : 'ExtendedHeuristicCompletion-Benchmarks',
@@ -873,6 +874,13 @@ CooStaticBenchmarks >> logTime: executionTime forPrefix: prefixSize [
     completionTimes
         at: prefixSize
         put: { times first + executionTime.  times second + 1 }.
+    self latencySamples add: executionTime.
+]
+
+{ #category : 'metrics' }
+CooStaticBenchmarks >> latencySamples [
+	"Raw milliseconds for percentiles. Historical aggregates cannot reconstruct these."
+	^ latencySamples ifNil: [ latencySamples := OrderedCollection new ]
 ]
 
 { #category : 'benchmarks' }

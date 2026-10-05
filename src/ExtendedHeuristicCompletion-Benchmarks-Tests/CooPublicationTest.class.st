@@ -283,3 +283,72 @@ CooPublicationTest >> testTopKAccuracyWeightsObservationsAndPreservesMissingData
 	self assert: (CooBenchmarkChart accuracyAt: 10 for: #sample runs: runs) equals: 0.75.
 	self assert: (CooBenchmarkChart accuracyAt: 10 for: #missing runs: runs) isNil
 ]
+
+{ #category : 'tests' }
+CooPublicationTest >> testRankingRowsExtendTableWithoutChangingExistingValues [
+	| comparison original extended originalRows extendedRows points |
+	comparison := self comparison.
+	original := CooBenchmarkChart latexResultsTableFor: comparison.
+	#(messages variables) do: [ :kind |
+		| run |
+		run := (comparison at: kind) first first.
+		CooBenchmarkChart rankingStrategies do: [ :strategy |
+			"Reuse a measured fixture benchmark to isolate publication formatting."
+			run results at: strategy put: (run results at: #heuristicsDependency) ] ].
+	extended := CooBenchmarkChart latexResultsTableFor: comparison.
+	originalRows := original lines select: [ :line | line beginsWith: '& ' ].
+	extendedRows := extended lines select: [ :line | line beginsWith: '& ' ].
+	self assert: extendedRows size equals: 30.
+	self assert: (extended includesSubstring: '\multirow{15}{*}{\textbf{Methods}}').
+	self assert: (extended includesSubstring: '\multirow{15}{*}{\textbf{Classes}}').
+	originalRows do: [ :row |
+		"The old final row gains a cline because additional rows follow."
+		self assert: (extendedRows anySatisfy: [ :line | line beginsWith: row ]) ].
+	CooBenchmarkChart rankingStrategies do: [ :strategy |
+		self assert: (extended includesSubstring: '& ', (CooBenchmarkChart labelFor: strategy), ' & ') ].
+	points := CooBenchmarkChart performancePointsFor: comparison.
+	self assert: points size equals: 30.
+	self assert: (CooBenchmarkChart performanceFormFor: comparison) extent equals: 1200 @ 1270
+]
+
+{ #category : 'tests' }
+CooPublicationTest >> testSixOriginalRowsPlusFiveRankingRows [
+	| comparison strategies latex rows requests folder |
+	self timeLimit: 1 minute.
+	comparison := self comparison.
+	strategies := #(heuristicsBaseline heuristicsDependency llm05B llm15B llm3B llm7B), CooBenchmarkChart rankingStrategies.
+	comparison at: #publicationStrategies put: strategies.
+	requests := transport requests size.
+	folder := FileLocator temp / ('coo-expanded-table-', UUID new asString).
+	[ CooBenchRunner export: comparison to: folder.
+		latex := (folder / 'results-table.tex') contents.
+		rows := latex lines select: [ :line | line beginsWith: '& ' ].
+		self assert: rows size equals: 22.
+		self assert: (latex includesSubstring: '\multirow{11}{*}{\textbf{Methods}}').
+		self assert: (latex includesSubstring: '\multirow{11}{*}{\textbf{Classes}}').
+		self assert: (latex includesSubstring: '& NeuralRank-20 & -- & --').
+		self deny: (latex includesSubstring: '& Hybrid Dependency').
+		self assert: transport requests size equals: requests.
+		self assert: folder children size equals: 3
+	] ensure: [ folder ensureDeleteAll ]
+]
+
+{ #category : 'tests' }
+CooPublicationTest >> testExplicitComparisonRunsOnlyRequestedStrategies [
+	| comparison |
+	comparison := CooBenchRunner compareMessagesAndVariablesFor: #('CooPublication-Fixture')
+		strategies: #(heuristicsBaseline heuristicsDependency).
+	#(messages variables) do: [ :kind |
+		self assert: (comparison at: kind) first first results keys asSet
+			equals: #(heuristicsBaseline heuristicsDependency) asSet ].
+	self assert: transport requests isEmpty.
+	self assert: ((CooBenchRunner latexResultsTableFor: comparison) includesSubstring: '\multirow{2}')
+]
+
+{ #category : 'tests' }
+CooPublicationTest >> testInvalidPublicationStrategyListFailsBeforeInference [
+	{ #(). #(llm05B llm05B). #(candidateRecall). #(unknownStrategy) } do: [ :strategies |
+		self should: [ CooBenchRunner compareMessagesAndVariablesFor: #('CooPublication-Fixture')
+			strategies: strategies ] raise: Error ].
+	self assert: transport requests isEmpty
+]
