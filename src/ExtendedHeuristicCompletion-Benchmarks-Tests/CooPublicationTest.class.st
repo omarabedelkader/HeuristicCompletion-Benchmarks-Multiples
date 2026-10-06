@@ -352,3 +352,40 @@ CooPublicationTest >> testInvalidPublicationStrategyListFailsBeforeInference [
 			strategies: strategies ] raise: Error ].
 	self assert: transport requests isEmpty
 ]
+
+{ #category : 'tests' }
+CooPublicationTest >> testRerankerExportWritesSeparatePerformancePlotWithoutInference [
+	| comparison folder requests table points normalGraph |
+	self timeLimit: 1 minute.
+	comparison := self comparison.
+	#(messages variables) do: [ :kind |
+		| run |
+		run := (comparison at: kind) first first.
+		CooBenchmarkChart rerankerStrategies do: [ :strategy |
+			"Reuse retained measurements to isolate export from model inference."
+			run results at: strategy put: (run results at: #heuristicsDependency) ] ].
+	comparison at: #publicationStrategies put: CooBenchmarkChart rerankerStrategies.
+	points := CooBenchmarkChart performancePointsFor: comparison.
+	self assert: points size equals: 8.
+	self assert: (points collect: [ :point | point at: #strategy ]) asSet
+		equals: CooBenchmarkChart rerankerStrategies asSet.
+	points do: [ :point |
+		self assert: (point at: #latencyMs) isNumber.
+		self assert: (point at: #memoryMB) isNumber ].
+	requests := transport requests size.
+	folder := FileLocator temp / ('coo-reranker-export-', UUID new asString).
+	[
+		folder ensureCreateDirectory.
+		normalGraph := folder / 'performance.png'.
+		normalGraph writeStreamDo: [ :out | out nextPutAll: 'preserve normal benchmark plot' ].
+		2 timesRepeat: [
+			table := CooBenchRunner exportReranker: comparison to: folder.
+			self assert: table basename equals: 'results-table-re-ranker.tex'.
+			self assert: table contents equals: (CooBenchRunner latexResultsTableFor: comparison).
+			self assert: (PNGReadWriter formFromFileNamed:
+				(folder / 'performance-re-ranker.png') fullName) extent equals: 1200 @ 1150.
+			self assert: normalGraph contents equals: 'preserve normal benchmark plot'.
+			self assert: folder children size equals: 3.
+			self assert: transport requests size equals: requests ]
+	] ensure: [ folder ensureDeleteAll ]
+]

@@ -480,8 +480,15 @@ The runner checks the serving model's split before inference. All split-based
 operations also reject changes to the eligible package pool: use the original
 image throughout, or create a new experiment after changing loaded packages.
 The four pure neural strategies (`neuralRank10`, `neuralRank20`, `neuralRank30`,
-`neuralRank50`) write `results-table-re-ranker.tex`; normal exports retain their
-existing names.
+`neuralRank50`) write `results-table-re-ranker.tex` and a separate
+`performance-re-ranker.png`. The image uses the same plot as the normal
+benchmarks: mean completion latency in milliseconds on Y and mean Pharo memory
+change per completion in MB on X. It shows the four re-ranking strategies for
+Methods and Classes. Values come from retained benchmark measurements, without
+running inference again. Latency includes candidate generation and the scoring
+request; memory is the Pharo VM delta, not the Python server's total RAM.
+Normal exports retain their existing names, including `performance.png`.
+`exportReranker:to:` still returns the table file for existing callers.
 
 For optional offline evaluation, collect test examples **after training** into
 another file with `CooBenchRunner exportTestForSplit: split to:

@@ -121,8 +121,9 @@ CooBenchRunner class >> export: comparison to: directory [
 
 { #category : 'exporting' }
 CooBenchRunner class >> exportReranker: comparison to: directory [
-	"Export the retained reranker table without running inference again."
-	| folder tableFile |
+	"Export the retained table and separate time/memory plot without new inference.
+	Keep returning the table file for existing callers."
+	| folder tableFile performanceFile |
 	folder := directory asFileReference.
 	folder ensureCreateDirectory.
 	tableFile := folder / 'results-table-re-ranker.tex'.
@@ -130,6 +131,9 @@ CooBenchRunner class >> exportReranker: comparison to: directory [
 		stream
 			truncate;
 			nextPutAll: (self latexResultsTableFor: comparison) ].
+	performanceFile := folder / 'performance-re-ranker.png'.
+	PNGReadWriter putForm: (CooBenchmarkChart performanceFormFor: comparison)
+		onFileNamed: performanceFile fullName.
 	^ tableFile
 ]
 
