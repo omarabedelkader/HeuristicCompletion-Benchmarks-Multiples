@@ -336,3 +336,33 @@ CooBenchRunnerMessage >> hybrid7B [
 		model: (CooBenchRunner llmModels at: #llm7B)
 		builder: self dependencyBuilder
 ]
+
+{ #category : 'ranking' }
+CooBenchRunnerMessage >> neuralRank10 [
+	^ self rankingCompletionFor: #messages limit: 10 benchmarkClass: CooNeuralRerankBenchmarks
+]
+
+{ #category : 'ranking' }
+CooBenchRunnerMessage >> neuralRank20 [
+	^ self rankingCompletionFor: #messages limit: 20 benchmarkClass: CooNeuralRerankBenchmarks
+]
+
+{ #category : 'ranking' }
+CooBenchRunnerMessage >> neuralRank30 [
+	^ self rankingCompletionFor: #messages limit: 30 benchmarkClass: CooNeuralRerankBenchmarks
+]
+
+{ #category : 'ranking' }
+CooBenchRunnerMessage >> neuralRank50 [
+	^ self rankingCompletionFor: #messages limit: 50 benchmarkClass: CooNeuralRerankBenchmarks
+]
+
+{ #category : 'ranking' }
+CooBenchRunnerMessage >> candidateRecall [
+	^ self rankingCompletionFor: #messages limit: 50 benchmarkClass: CooCandidateRecallBenchmarks
+]
+
+{ #category : 'ranking' }
+CooBenchRunnerMessage >> adaptiveRank05B [
+	^ self rankingCompletionFor: #messages limit: 30 benchmarkClass: CooAdaptiveHybridBenchmarks
+]

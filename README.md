@@ -201,3 +201,365 @@ pharo --headless /path/to/copy.image st --quit scripts/smoke-llm.st
 `test.st` loads and runs the existing regression tests plus the new offline tests. `smoke-llm.st` calls all four real Ollama models for both pure LM and hybrid on a tiny fixture package and exports the three artifacts to `benchmark-smoke-results`; those results are smoke-test measurements, not NECompletion results. Neither script saves the image. The baseline also exposes a `Tests` group.
 
 A full run sends one request per eligible callsite/prefix **for each of the four models, once for pure LM and once for hybrid**. The total depends on the image contents. The full NECompletion experiment can take substantially longer than the tiny smoke test.
+
+## Opt-in neural reranking and adaptive completion
+
+The original ten strategies and three publication artifacts remain the default.
+The new strategies are explicit: `candidateRecall`, `neuralRank10`,
+`neuralRank20`, `neuralRank30`, `neuralRank50`, and `adaptiveRank05B`, available
+on both message and class-reference runners. None is added to `necTests` or
+`randomPackages:` automatically. The original LM-first hybrids remain useful
+comparison baselines; their fusion semantics have not changed.
+
+The new path is dependency candidates → tiny neural scores → top ten. The
+adaptive variant calls the existing one-token 0.5B FIM client only when the
+normalized softmax entropy exceeds 0.8 or the top-two margin is below 0.2.
+Empty candidate sets trigger fallback. These thresholds are experimental and
+must be tuned on validation packages; softmax confidence is not calibrated
+probability of correctness. A confident path makes no generative request.
+A fallback result enters the union with rank zero and an `lmAgreement` feature;
+the same ranker scores the union, with stable ties preserving input order.
+Empty generation abstains. It never automatically inserts the LM at rank one.
+
+**Preserving the benchmark:** prefixes 2–8, message/class-reference predicates,
+exact-match scoring, and final top-ten MRR use the existing accounting. AST
+changes are restored with `ensure:`. Model/transport errors are retained and
+raised, not scored as misses. Candidate retrieval expands in batches of ten:
+some Pharo images sort *each fetched batch*, so fetching fifty in one operation
+would change the existing top ten. Batched expansion preserves that first ten
+and produces nested pools for K=10/20/30/50. Provenance decorates a fresh runner
+builder, retaining the first-producing heuristic by entry identity without
+modifying completion entry classes or global heuristic settings.
+
+### Experiment zero: recall and training export
+
+No Python service or LM is needed for this step:
+
+```smalltalk
+| runner recall |
+runner := CooBenchRunnerMessage new
+    package: (PackageOrganizer default packageNamed: 'NECompletion');
+    baseline: #heuristicsDependency;
+    others: #(candidateRecall);
+    run; yourself.
+recall := runner results at: #candidateRecall.
+(CooRankingReport summaryFor: #candidateRecall runs: { runner }) inspect.
+recall exportTrainingTo: '/tmp/necompletion-messages.jsonl'.
+```
+
+Use `CooBenchRunnerVariables` for class references. Export each chosen package
+separately, then concatenate JSONL files. Every row retains its package `group`,
+masked source prefix, candidate names/ranks/provenance, candidate limit, and
+training target. Candidate misses and empty lists are retained. Inference
+requests use a strict allowlist and contain no target, package identity, audit
+snapshot, method identity field, or FIM suffix. Only source **before the simulated
+cursor**, including the typed prefix, becomes neural context.
+
+The initial feature schema includes reciprocal rank, prefix/name lengths and
+ratio, exact-prefix match, producing heuristic, receiver kind, completion kind,
+LM agreement, preceding-source occurrence count, context subtokens and candidate
+UTF-8 bytes. Unavailable inferred types are explicitly `nil`; project/package
+usage-frequency indexes and richer type evidence are not fabricated. The
+context encoder retains the last 64 subtokens, the candidate encoder the first
+64 bytes; both use small embeddings and CNNs, followed by a 64-unit scoring MLP.
+Widths 16/32/64 are supported.
+
+### Train and serve
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -r reranker/requirements.txt
+.venv/bin/python reranker/train.py /tmp/corpus.jsonl ranking-models/rank32 \
+  --validation-groups ValidationPackage --test-groups TestPackage \
+  --epochs 10 --width 32
+.venv/bin/python reranker/evaluate.py ranking-models/rank32 ranking-models/rank32/test.jsonl
+.venv/bin/python reranker/serve.py ranking-models/rank32
+```
+
+Supply real group names from the exports. At least three distinct package/project
+groups are required: training, validation and untouched test. There is no random
+row split. If multiple packages belong to one project, assign their `group` to
+that project **before splitting**. Listwise softmax training skips candidate
+misses only for the loss, reports their count, and includes them as zero scores
+in validation/evaluation. Recall is printed before training. Recall above the
+exported candidate limit is unavailable, not inferred. Checkpoints are selected
+using validation MRR; test rows are exported untouched. Model metadata records
+groups, seed, feature schema, corpus SHA-256, parameter count and fusion-data
+availability. Export checks compare PyTorch and ONNX scores.
+
+The loopback service listens on `127.0.0.1:8765/rank` and uses ONNX Runtime CPU
+with one inference thread. It returns every supplied candidate exactly once,
+with softmax scores and a SHA-256 model identifier. Pharo rejects missing,
+invented, duplicate or malformed candidates and invalid probabilities. No
+model is silently downloaded or initialized by the benchmark. For another
+endpoint, construct `CooNeuralRankerClient new baseUrl: ...`, pass it to
+`CooNeuralRanker new client: ...`, and set the benchmark's `ranker:` explicitly.
+The deployment interfaces follow the [PyTorch ONNX exporter](https://docs.pytorch.org/docs/stable/onnx.html)
+and [ONNX Runtime API](https://onnxruntime.ai/docs/api/python/api_summary.html).
+
+### Fusion data and adaptive evaluation
+
+A dependency-only model has not learned how to interpret generated candidates.
+Adaptive fallback therefore requires a model trained on LM union observations.
+Bootstrap those observations using the explicit data collector (it calls 0.5B
+for every row and does not require an existing neural model):
+
+```smalltalk
+| collector |
+collector := CooFusionTrainingBenchmarks new
+    kind: #messages;
+    scope: (CoBenchmarkPackage on: (PackageOrganizer default packageNamed: 'TrainingPackage'));
+    builder: CooBenchRunnerMessage new dependencyBuilder;
+    run; yourself.
+collector exportTrainingTo: '/tmp/dependency-training.jsonl'.
+collector exportFusionTrainingTo: '/tmp/fusion-training.jsonl'.
+```
+
+Combine dependency and union rows from the selected packages before training;
+their identical package groups keep both forms on the same side of the split.
+Do not use collector timing as neural/adaptive performance. Already-run adaptive
+benchmarks also support `exportFusionTrainingTo:` for later experiments.
+To try a 1.5B fallback, configure a `CooAdaptiveHybridBenchmarks` instance with
+`client: (CooLLMClient default copy model: (CooBenchRunner llmModels at: #llm15B); yourself)`.
+Train/evaluate fusion against the same fallback model. The initial gate uses
+margin/entropy; a learned acceptance or expected-utility gate is a subsequent
+experiment, not claimed by this implementation.
+
+With the appropriate service running:
+
+```smalltalk
+| runner strategies summaries best |
+strategies := #(heuristicsDependency neuralRank10 neuralRank20 neuralRank30 neuralRank50 adaptiveRank05B).
+runner := CooBenchRunnerMessage new
+    package: (PackageOrganizer default packageNamed: 'HeldOutPackage');
+    baseline: strategies first; others: strategies allButFirst;
+    run; yourself.
+summaries := strategies collect: [ :strategy |
+    CooRankingReport summaryFor: strategy runs: { runner } ].
+CooRankingReport exportStrategies: strategies runs: { runner } to: '/tmp/ranking-results.json'.
+(CooRankingReport frontier: summaries) inspect.
+best := CooRankingReport bestIn: summaries p95Budget: 100 memoryBudget: nil.
+best inspect.
+```
+
+Aggregate multiple package runners in `runs:`; compare the same kind and matched
+populations. Add `llm05B`/`hybrid05B` to the explicit strategy list to compare
+always-on generation. Repeat with model widths 16/32/64 to sweep model size.
+The standard publication exporter now includes recognized neural/adaptive rows
+when those results are present. Its table retains Average and prefixes 2–8;
+Methods/Classes multirow counts and the performance-plot legend expand
+automatically. The ranking JSON exporter supplies the additional latency,
+recall and gating diagnostics.
+
+Summaries report observation-weighted MRR, Accuracy@1/@3/@10, mean latency,
+nearest-rank P50/P95/P99, mean Pharo memory delta, measured candidate recall,
+errors and fallback rate. Raw latency retention is the only change to shared
+benchmark instrumentation; existing time totals/means are unchanged. Historical
+runs without complete raw samples have `nil` percentiles. Memory delta is **not
+process RAM**: a non-nil memory budget requires an independently measured
+`processMemoryMB` in each summary, otherwise the strategy is ineligible. The
+Pareto frontier maximizes MRR and minimizes mean end-to-end latency; budget
+selection maximizes MRR subject to P95. `utilityFor:lambda:` supplies the optional
+`MRR - lambda * ln(1 + meanLatencyMs)` score. Failed runs are ineligible.
+
+Audit JSONL separates `candidateGenerationMs`, Pharo `featureExtractionMs`,
+client `serializationMs`, `requestRoundTripMs`, server `feature_ms` and
+`inference_ms`, plus optional `generationMs`, union construction `fusionMs`,
+`fusionRanking` and end-to-end `totalMs`. The round trip **includes** server work;
+do not add it to server inference again. `transportAndServerOverheadMs` is the
+nonnegative residual after reported server feature/inference time, including
+server JSON/scheduling overhead, not a pure network measurement. Python-only
+evaluation explicitly excludes Pharo and HTTP; use Pharo total latency for UX
+budgets. Service/model startup occurs before requests; first-inference effects
+remain in the measured samples.
+
+### One-package, one-class, one-method validation
+
+Run from this checkout in a disposable image, without saving it:
+
+```sh
+pharo --headless /path/to/copy.image st --quit scripts/test.st
+.venv/bin/python -m unittest discover -s reranker -v
+pharo --headless /path/to/copy.image st --quit scripts/smoke-ranking-export.st
+```
+
+For an end-to-end plumbing check before a real corpus/model exists, train the
+explicitly **synthetic smoke fixture** (never use it to claim completion quality):
+
+```sh
+.venv/bin/python reranker/smoke_fixture.py /tmp/ranking-synthetic.jsonl
+.venv/bin/python reranker/train.py /tmp/ranking-synthetic.jsonl ranking-models/smoke \
+  --validation-groups smoke-validation --test-groups smoke-test --epochs 3 --width 16
+.venv/bin/python reranker/serve.py ranking-models/smoke
+# In another terminal:
+COO_SMOKE_LM=1 pharo --headless /path/to/copy.image st --quit scripts/smoke-ranking.st
+```
+
+Omit `COO_SMOKE_LM=1` to test only the four neural K values. Both smoke scripts
+create exactly one fixture package, containing one class with one method. They
+assert matching per-prefix populations; recall/export additionally asserts
+baseline top-ten MRR and captured provenance. The fixture supplies five message
+and seven class-reference observations per strategy. Results go into
+`benchmark-ranking-smoke-results/`, separately from publication results. These
+smoke measurements establish integration, not a quality gain or general recall
+ceiling. Training a useful model and selecting thresholds requires the grouped
+real corpus experiment described above.
+
+### Shared package holdout: normal benchmarks and re-ranking
+
+Load the `neural-ranking` branch as usual:
+
+```smalltalk
+Metacello new
+  githubUser: 'omarabedelkader' project: 'HeuristicCompletion-Benchmarks-Multiples' commitish: 'neural-ranking' path: 'src';
+  baseline: 'ExtendedHeuristicCompletionBenchmarks';
+  load.
+```
+
+Select **once, before any benchmarks or training**, and save the split:
+
+```smalltalk
+| split |
+split := CooBenchmarkSplit benchmarkPackages: 50 seed: 42.
+split writeTo: 'experiment/split.json'.
+```
+
+The split contains exactly 50 benchmark packages and **every other eligible
+package in the image** as training packages. Empty packages and packages without
+methods in the benchmark traversal cannot produce examples and are not eligible.
+This is a package holdout, not a project-family holdout. No families or remaining
+packages are discarded. At least one eligible package must remain for training.
+An existing split file cannot be overwritten; read it again for subsequent steps.
+
+Run the normal baseline, dependency, LLM completion and LLM hybrid benchmarks:
+
+```smalltalk
+| split comparison |
+split := CooBenchmarkSplit readFrom: 'experiment/split.json'.
+comparison := CooBenchRunner normalBenchmarksForSplit: split.
+CooBenchRunner export: comparison to: 'experiment/results'.
+```
+
+Export training data from the remaining packages, for both completion kinds:
+
+```smalltalk
+| split |
+split := CooBenchmarkSplit readFrom: 'experiment/split.json'.
+CooBenchRunner exportTrainingForSplit: split to: 'experiment/training.jsonl'.
+```
+
+From the repository directory, train and start the service (adjust paths if the
+Pharo working directory differs):
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r reranker/requirements.txt
+.venv/bin/python reranker/train.py experiment/training.jsonl experiment/model \
+  --package-split experiment/split.json --epochs 10 --width 32 --seed 42
+.venv/bin/python reranker/serve.py experiment/model
+```
+
+This mode trains for fixed epochs on all remaining packages. It does not read
+benchmark examples or use them for validation/model selection. It rejects any
+training row whose package is outside the saved training partition. The model
+metadata retains the complete split and identifies packages producing no rows.
+Candidate misses remain in the corpus, while only positive candidate examples
+can contribute to the ranking loss. The earlier explicit train/validation/test
+CLI mode remains available for other experiments.
+
+With the service running, benchmark the **same saved packages**:
+
+```smalltalk
+| split comparison |
+split := CooBenchmarkSplit readFrom: 'experiment/split.json'.
+comparison := CooBenchRunner rerankerBenchmarksForSplit: split.
+CooBenchRunner exportReranker: comparison to: 'experiment/results'.
+```
+
+The runner checks the serving model's split before inference. All split-based
+operations also reject changes to the eligible package pool: use the original
+image throughout, or create a new experiment after changing loaded packages.
+The four pure neural strategies (`neuralRank10`, `neuralRank20`, `neuralRank30`,
+`neuralRank50`) write `results-table-re-ranker.tex` and a separate
+`performance-re-ranker.png`. The image uses the same plot as the normal
+benchmarks: mean completion latency in milliseconds on Y and mean Pharo memory
+change per completion in MB on X. It shows the four re-ranking strategies for
+Methods and Classes. Values come from retained benchmark measurements, without
+running inference again. Latency includes candidate generation and the scoring
+request; memory is the Pharo VM delta, not the Python server's total RAM.
+Normal exports retain their existing names, including `performance.png`.
+`exportReranker:to:` still returns the table file for existing callers.
+
+For optional offline evaluation, collect test examples **after training** into
+another file with `CooBenchRunner exportTestForSplit: split to:
+'experiment/test.jsonl'`, then run:
+
+```bash
+.venv/bin/python reranker/evaluate.py experiment/model experiment/test.jsonl
+```
+
+The sibling `heuristics-vs-llm` repository automates this workflow:
+
+```bash
+BENCHMARK_PACKAGE_COUNT=50 ./pipeline-normal-bench.sh
+./pipeline-re-ranker-bench.sh
+```
+
+Both scripts share `experiment/split.json`, the image, and a frozen source
+snapshot. Choose a new `EXPERIMENT_DIR` for a new selection. The normal models
+must already be available in Ollama; the re-ranker service is managed by its
+pipeline. These scripts use the local benchmark checkout when present, otherwise
+the GitHub `neural-ranking` branch (which must contain these changes).
+
+The older `randomPackages:` and `randomPackagesForReranker:` methods remain
+available for independent exploratory runs. Each makes a fresh selection: do
+**not** use them for the shared-holdout experiment; use the split-based methods
+above instead.
+
+### The same publication table, with additional rows
+
+To keep exactly the six strategies in the original table and add the five new
+ones, run this after starting a trained, fusion-capable ranker service:
+
+```smalltalk
+| comparison |
+comparison := CooBenchRunner
+    compareMessagesAndVariablesFor: #('HeldOutPackage')
+    strategies: #(heuristicsBaseline heuristicsDependency
+        llm05B llm15B llm3B llm7B
+        neuralRank10 neuralRank20 neuralRank30 neuralRank50 adaptiveRank05B).
+CooBenchRunner export: comparison to: 'benchmark-results'.
+```
+
+`results-table.tex` has **11 Methods rows and 11 Classes rows**, with the same
+caption, columns, three-decimal MRR values, observation-weighted Average and
+prefixes 2–8. The added labels are NeuralRank-10, NeuralRank-20, NeuralRank-30,
+NeuralRank-50 and AdaptiveRank + 0.5B. `\multirow` and separator lines are generated
+from the selected row count. Missing observations remain `--`.
+
+To also retain the four always-on hybrids, pass
+`CooBenchmarkChart publicationStrategies , CooBenchmarkChart rankingStrategies`
+as the strategy list: that produces 15 rows per category. Existing calls without
+an explicit strategy list still run the original ten strategies. The exporter
+also automatically appends known ranking strategies found in retained comparison
+results, so re-exporting does not trigger inference. An explicit
+`#publicationStrategies` entry in a retained comparison controls its row order
+and subset. Corpus summary and performance PNG retain the same filenames; the
+PNG includes the additional strategies and expands its legend as needed.
+
+To run **all 15 strategies together on exactly one package, one class and one
+method**, start the ranker service and Ollama with all four configured models,
+then run in a disposable Pharo image:
+
+```sh
+pharo --headless /path/to/copy.image st --quit scripts/smoke-all-strategies.st
+```
+
+This verifies the corpus size and every per-prefix population, runs both Methods
+and Classes, and saves `results-table.tex` (30 rows), `performance.png`,
+`dataset-summary.tex`, `metrics.json` and per-strategy audit JSONL in
+`benchmark-all-strategies-smoke-results/`. Completed strategy metrics and audit
+records are saved incrementally. The fixture has five message and seven class
+observations per strategy; Methods prefixes 5–8 have no observations and show
+`--`. If using the synthetic smoke ranker, the neural/adaptive measurements are
+integration checks, not evidence of trained-model completion quality.

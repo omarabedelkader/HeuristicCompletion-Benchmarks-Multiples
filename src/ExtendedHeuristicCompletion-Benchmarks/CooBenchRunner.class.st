@@ -60,6 +60,19 @@ CooBenchRunner class >> randomPackages: count [
 ]
 
 { #category : 'benchmarks' }
+CooBenchRunner class >> randomPackagesForReranker: count [
+	"Run only the pure neural rerankers on the same packages for both kinds."
+	| packageNames |
+	packageNames := self
+		randomPackageNames: count
+		from: self eligiblePackageNames
+		using: Random new.
+	^ self
+		compareMessagesAndVariablesFor: packageNames
+		strategies: CooBenchmarkChart rerankerStrategies
+]
+
+{ #category : 'benchmarks' }
 CooBenchRunner class >> randomPackages: count seed: seed [
 	"Repeat the selection with the same seed and eligible package names."
 	| comparison |
@@ -104,6 +117,24 @@ CooBenchRunner class >> randomPackageNames: count from: packageNames using: rand
 CooBenchRunner class >> export: comparison to: directory [
 	"Export previously computed results; no new inference requests."
 	^ CooBenchmarkChart export: comparison to: directory
+]
+
+{ #category : 'exporting' }
+CooBenchRunner class >> exportReranker: comparison to: directory [
+	"Export the retained table and separate time/memory plot without new inference.
+	Keep returning the table file for existing callers."
+	| folder tableFile performanceFile |
+	folder := directory asFileReference.
+	folder ensureCreateDirectory.
+	tableFile := folder / 'results-table-re-ranker.tex'.
+	tableFile writeStreamDo: [ :stream |
+		stream
+			truncate;
+			nextPutAll: (self latexResultsTableFor: comparison) ].
+	performanceFile := folder / 'performance-re-ranker.png'.
+	PNGReadWriter putForm: (CooBenchmarkChart performanceFormFor: comparison)
+		onFileNamed: performanceFile fullName.
+	^ tableFile
 ]
 
 { #category : 'benchmarks' }
@@ -328,4 +359,89 @@ CooBenchRunner >> hybridCompletionFor: kind model: modelName builder: aBuilder [
 		builder: aBuilder; yourself.
 	activeStrategy ifNotNil: [ results at: activeStrategy put: benchmark ].
 	^ benchmark run; yourself
+]
+
+{ #category : 'ranking' }
+CooBenchRunner >> rankingCompletionFor: kind limit: k benchmarkClass: benchmarkClass [
+
+	| benchmark |
+	benchmark := benchmarkClass new
+		kind: kind; candidateLimit: k;
+		scope: (CoBenchmarkPackage on: package);
+		builder: self dependencyBuilder; yourself.
+	activeStrategy ifNotNil: [ results at: activeStrategy put: benchmark ].
+	^ benchmark run; yourself
+]
+
+{ #category : 'benchmarks' }
+CooBenchRunner class >> compareMessagesAndVariablesFor: packageNames strategies: strategies [
+	"Opt-in comparison on identical packages, with the requested publication rows."
+	| selectedNames ordered comparison packages |
+	ordered := CooBenchmarkChart validatePublicationStrategies: strategies.
+	selectedNames := packageNames asArray copy.
+	packages := selectedNames collect: [ :packageName | PackageOrganizer default packageNamed: packageName ].
+	comparison := Dictionary new
+		at: #packageNames put: selectedNames;
+		at: #publicationStrategies put: ordered;
+		at: #corpus put: (self corpusSummaryForPackageNames: selectedNames); yourself.
+	{ #messages -> CooBenchRunnerMessage. #variables -> CooBenchRunnerVariables } do: [ :entry |
+		| runs |
+		runs := packages collect: [ :package |
+			entry value new package: package; baseline: ordered first;
+				others: ordered allButFirst; run; yourself ].
+		comparison at: entry key put: {
+			runs. self stringResultForABenchCollection: runs.
+			self latexTableResultForABenchCollection: runs } ].
+	^ comparison
+]
+
+{ #category : 'benchmarks' }
+CooBenchRunner class >> normalBenchmarksForSplit: split [
+	| comparison |
+	split validateAgainst: self eligiblePackageNames.
+	comparison := self compareMessagesAndVariablesFor: split benchmarkPackageNames.
+	comparison at: #packageSplit put: split asDictionary; at: #selectionSeed put: split seed.
+	^ comparison
+]
+
+{ #category : 'benchmarks' }
+CooBenchRunner class >> rerankerBenchmarksForSplit: split [
+	| comparison |
+	split validateAgainst: self eligiblePackageNames.
+	CooNeuralRankerClient new validateSplit: split.
+	comparison := self compareMessagesAndVariablesFor: split benchmarkPackageNames
+		strategies: CooBenchmarkChart rerankerStrategies.
+	comparison at: #packageSplit put: split asDictionary; at: #selectionSeed put: split seed.
+	^ comparison
+]
+
+{ #category : 'exporting' }
+CooBenchRunner class >> exportTrainingForSplit: split to: path [
+	split validateAgainst: self eligiblePackageNames.
+	^ self exportRankingCorpusForPackages: split trainingPackageNames to: path
+]
+
+{ #category : 'exporting' }
+CooBenchRunner class >> exportTestForSplit: split to: path [
+	"Only call after training; keep held-out examples in a separate file."
+	split validateAgainst: self eligiblePackageNames.
+	^ self exportRankingCorpusForPackages: split benchmarkPackageNames to: path
+]
+
+{ #category : 'private' }
+CooBenchRunner class >> exportRankingCorpusForPackages: packageNames to: path [
+	| file |
+	file := path asFileReference.
+	file parent ensureCreateDirectory.
+	file writeStreamDo: [ :out |
+		out truncate.
+		packageNames do: [ :packageName |
+			{ CooBenchRunnerMessage. CooBenchRunnerVariables } do: [ :runnerClass |
+				| runner |
+				Stdio stdout nextPutAll: packageName, ' / ', runnerClass name; lf; flush.
+				runner := runnerClass new
+					package: (PackageOrganizer default packageNamed: packageName);
+					baseline: #candidateRecall; others: #(); run; yourself.
+				(runner results at: #candidateRecall) exportTrainingOn: out ] ] ].
+	^ file
 ]
