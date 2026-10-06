@@ -19,6 +19,10 @@ def main():
     forbidden = set(runtime.metadata["trainGroups"] + runtime.metadata["validationGroups"])
     if not rows or any(r["group"] in forbidden for r in rows):
         raise ValueError("Evaluation requires nonempty data disjoint from train/validation groups")
+    if "packageSplit" in runtime.metadata:
+        benchmark = set(runtime.metadata["packageSplit"]["benchmark"])
+        if any(r["group"] not in benchmark for r in rows):
+            raise ValueError("Evaluation rows must belong to the saved benchmark packages")
     summaries = []
     for k in [10, 20, 30, 50]:
         if any(r.get("candidateLimit", 0) < k for r in rows):

@@ -390,3 +390,54 @@ CooBenchRunner class >> compareMessagesAndVariablesFor: packageNames strategies:
 			self latexTableResultForABenchCollection: runs } ].
 	^ comparison
 ]
+
+{ #category : 'benchmarks' }
+CooBenchRunner class >> normalBenchmarksForSplit: split [
+	| comparison |
+	split validateAgainst: self eligiblePackageNames.
+	comparison := self compareMessagesAndVariablesFor: split benchmarkPackageNames.
+	comparison at: #packageSplit put: split asDictionary; at: #selectionSeed put: split seed.
+	^ comparison
+]
+
+{ #category : 'benchmarks' }
+CooBenchRunner class >> rerankerBenchmarksForSplit: split [
+	| comparison |
+	split validateAgainst: self eligiblePackageNames.
+	CooNeuralRankerClient new validateSplit: split.
+	comparison := self compareMessagesAndVariablesFor: split benchmarkPackageNames
+		strategies: CooBenchmarkChart rerankerStrategies.
+	comparison at: #packageSplit put: split asDictionary; at: #selectionSeed put: split seed.
+	^ comparison
+]
+
+{ #category : 'exporting' }
+CooBenchRunner class >> exportTrainingForSplit: split to: path [
+	split validateAgainst: self eligiblePackageNames.
+	^ self exportRankingCorpusForPackages: split trainingPackageNames to: path
+]
+
+{ #category : 'exporting' }
+CooBenchRunner class >> exportTestForSplit: split to: path [
+	"Only call after training; keep held-out examples in a separate file."
+	split validateAgainst: self eligiblePackageNames.
+	^ self exportRankingCorpusForPackages: split benchmarkPackageNames to: path
+]
+
+{ #category : 'private' }
+CooBenchRunner class >> exportRankingCorpusForPackages: packageNames to: path [
+	| file |
+	file := path asFileReference.
+	file parent ensureCreateDirectory.
+	file writeStreamDo: [ :out |
+		out truncate.
+		packageNames do: [ :packageName |
+			{ CooBenchRunnerMessage. CooBenchRunnerVariables } do: [ :runnerClass |
+				| runner |
+				Stdio stdout nextPutAll: packageName, ' / ', runnerClass name; lf; flush.
+				runner := runnerClass new
+					package: (PackageOrganizer default packageNamed: packageName);
+					baseline: #candidateRecall; others: #(); run; yourself.
+				(runner results at: #candidateRecall) exportTrainingOn: out ] ] ].
+	^ file
+]

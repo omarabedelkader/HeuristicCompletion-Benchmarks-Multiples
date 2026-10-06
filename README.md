@@ -405,25 +405,109 @@ smoke measurements establish integration, not a quality gain or general recall
 ceiling. Training a useful model and selecting thresholds requires the grouped
 real corpus experiment described above.
 
-### Reranker-only random-package experiment
+### Shared package holdout: normal benchmarks and re-ranking
 
-With a trained ranker service running, run the four pure neural rerankers on
-the same 40 randomly selected packages for both methods and variables:
+Load the `neural-ranking` branch as usual:
 
 ```smalltalk
-| comparison file |
-comparison := CooBenchRunner randomPackagesForReranker: 40.
-file := CooBenchRunner
-    exportReranker: comparison
-    to: '/Users/omar/Desktop/HeuristicCompletion-Benchmarks-Multiples/benchmark-results'.
-file inspect.
+Metacello new
+  githubUser: 'omarabedelkader' project: 'HeuristicCompletion-Benchmarks-Multiples' commitish: 'neural-ranking' path: 'src';
+  baseline: 'ExtendedHeuristicCompletionBenchmarks';
+  load.
 ```
 
-`CooBenchmarkChart rerankerStrategies` selects only `neuralRank10`,
-`neuralRank20`, `neuralRank30`, and `neuralRank50`, without adaptive LLM fallback.
-The exporter writes only `results-table-re-ranker.tex` and returns its file
-reference. It reuses the retained comparison without rerunning inference.
-The existing `randomPackages:` runner and generic `export:to:` are unchanged.
+Select **once, before any benchmarks or training**, and save the split:
+
+```smalltalk
+| split |
+split := CooBenchmarkSplit benchmarkPackages: 50 seed: 42.
+split writeTo: 'experiment/split.json'.
+```
+
+The split contains exactly 50 benchmark packages and **every other eligible
+package in the image** as training packages. Empty packages and packages without
+methods in the benchmark traversal cannot produce examples and are not eligible.
+This is a package holdout, not a project-family holdout. No families or remaining
+packages are discarded. At least one eligible package must remain for training.
+An existing split file cannot be overwritten; read it again for subsequent steps.
+
+Run the normal baseline, dependency, LLM completion and LLM hybrid benchmarks:
+
+```smalltalk
+| split comparison |
+split := CooBenchmarkSplit readFrom: 'experiment/split.json'.
+comparison := CooBenchRunner normalBenchmarksForSplit: split.
+CooBenchRunner export: comparison to: 'experiment/results'.
+```
+
+Export training data from the remaining packages, for both completion kinds:
+
+```smalltalk
+| split |
+split := CooBenchmarkSplit readFrom: 'experiment/split.json'.
+CooBenchRunner exportTrainingForSplit: split to: 'experiment/training.jsonl'.
+```
+
+From the repository directory, train and start the service (adjust paths if the
+Pharo working directory differs):
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r reranker/requirements.txt
+.venv/bin/python reranker/train.py experiment/training.jsonl experiment/model \
+  --package-split experiment/split.json --epochs 10 --width 32 --seed 42
+.venv/bin/python reranker/serve.py experiment/model
+```
+
+This mode trains for fixed epochs on all remaining packages. It does not read
+benchmark examples or use them for validation/model selection. It rejects any
+training row whose package is outside the saved training partition. The model
+metadata retains the complete split and identifies packages producing no rows.
+Candidate misses remain in the corpus, while only positive candidate examples
+can contribute to the ranking loss. The earlier explicit train/validation/test
+CLI mode remains available for other experiments.
+
+With the service running, benchmark the **same saved packages**:
+
+```smalltalk
+| split comparison |
+split := CooBenchmarkSplit readFrom: 'experiment/split.json'.
+comparison := CooBenchRunner rerankerBenchmarksForSplit: split.
+CooBenchRunner exportReranker: comparison to: 'experiment/results'.
+```
+
+The runner checks the serving model's split before inference. All split-based
+operations also reject changes to the eligible package pool: use the original
+image throughout, or create a new experiment after changing loaded packages.
+The four pure neural strategies (`neuralRank10`, `neuralRank20`, `neuralRank30`,
+`neuralRank50`) write `results-table-re-ranker.tex`; normal exports retain their
+existing names.
+
+For optional offline evaluation, collect test examples **after training** into
+another file with `CooBenchRunner exportTestForSplit: split to:
+'experiment/test.jsonl'`, then run:
+
+```bash
+.venv/bin/python reranker/evaluate.py experiment/model experiment/test.jsonl
+```
+
+The sibling `heuristics-vs-llm` repository automates this workflow:
+
+```bash
+BENCHMARK_PACKAGE_COUNT=50 ./pipeline-normal-bench.sh
+./pipeline-re-ranker-bench.sh
+```
+
+Both scripts share `experiment/split.json`, the image, and a frozen source
+snapshot. Choose a new `EXPERIMENT_DIR` for a new selection. The normal models
+must already be available in Ollama; the re-ranker service is managed by its
+pipeline. These scripts use the local benchmark checkout when present, otherwise
+the GitHub `neural-ranking` branch (which must contain these changes).
+
+The older `randomPackages:` and `randomPackagesForReranker:` methods remain
+available for independent exploratory runs. Each makes a fresh selection: do
+**not** use them for the shared-holdout experiment; use the split-based methods
+above instead.
 
 ### The same publication table, with additional rows
 

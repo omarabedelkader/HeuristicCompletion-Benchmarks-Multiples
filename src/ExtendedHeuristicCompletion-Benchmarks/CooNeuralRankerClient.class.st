@@ -82,3 +82,22 @@ CooNeuralRankerClient >> validate: response candidates: candidates [
 		(value isNumber and: [ value >= 0 and: [ value < 1.0e12 ] ])
 			ifFalse: [ self error: 'Invalid ranker timing' ] ]
 ]
+
+{ #category : 'ranking' }
+CooNeuralRankerClient >> validateSplit: split [
+	"Reject a service trained for a different experiment before benchmarking."
+	| http metadata |
+	http := ZnClient new.
+	[
+		http url: baseUrl, '/metadata'; timeout: timeout; numberOfRetries: 0;
+			enforceHttpSuccess: true; get.
+		metadata := STONJSON fromString: http contents
+	] ensure: [ http close ].
+	self validateMetadata: metadata split: split
+]
+
+{ #category : 'ranking' }
+CooNeuralRankerClient >> validateMetadata: metadata split: split [
+	(metadata at: 'packageSplit' ifAbsent: [ nil ]) = split asDictionary ifFalse: [
+		self error: 'The running re-ranker was not trained with this package split' ]
+]

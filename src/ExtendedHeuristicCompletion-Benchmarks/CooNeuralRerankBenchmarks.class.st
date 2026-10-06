@@ -112,12 +112,7 @@ CooNeuralRerankBenchmarks >> exportTrainingTo: path [
 	file := path asFileReference.
 	file writeStreamDo: [ :out |
 		out truncate.
-		records do: [ :record | (record includesKey: #rank) ifTrue: [
-			| row |
-			row := Dictionary new.
-			#('schema' 'kind' 'prefix' 'sourcePrefix' 'receiverKind' 'candidates' 'group' 'target' 'candidateLimit')
-				do: [ :key | row at: key put: (record at: key) ].
-			out nextPutAll: (STONJSON toString: row); lf ] ] ].
+		self exportTrainingOn: out ].
 	^ file
 ]
 
@@ -159,4 +154,14 @@ CooNeuralRerankBenchmarks >> diagnosticSummary [
 		#count -> (records count: [ :row | row includesKey: #rank ]).
 		#errors -> (records count: [ :row | row includesKey: #error ]).
 		#fallbackCalls -> (records count: [ :row | row at: #fallbackCalled ifAbsent: [ false ] ]) }
+]
+
+{ #category : 'ranking' }
+CooNeuralRerankBenchmarks >> exportTrainingOn: out [
+	records do: [ :record | (record includesKey: #rank) ifTrue: [
+		| row |
+		row := Dictionary new.
+		#('schema' 'kind' 'prefix' 'sourcePrefix' 'receiverKind' 'candidates' 'group' 'target' 'candidateLimit')
+			do: [ :key | row at: key put: (record at: key) ].
+		out nextPutAll: (STONJSON toString: row); lf ] ]
 ]

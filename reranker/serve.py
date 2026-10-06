@@ -45,6 +45,18 @@ class Runtime:
 
 def server(runtime, port):
     class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path != "/metadata":
+                self.send_error(404)
+                return
+            body = json.dumps({"modelId": runtime.model_id,
+                               "packageSplit": runtime.metadata.get("packageSplit")}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
         def do_POST(self):
             try:
                 if self.path != "/rank":
