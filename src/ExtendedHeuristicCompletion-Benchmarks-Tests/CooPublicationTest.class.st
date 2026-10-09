@@ -12,14 +12,32 @@ CooPublicationTest >> setUp [
 	previousClient := CooLLMClient default.
 	transport := CooLLMTestTransport new.
 	CooLLMClient default: (CooLLMClient new transport: transport; yourself).
+	"Attempt n answers '' then '2'..'10', so every fixture prefix p samples
+	the ten real names p, p2 .. p10 and no strategy skips a prefix."
+	transport responseBlock: [ :payload |
+		| attempt |
+		attempt := ((payload at: 'options') at: 'seed') - 41.
+		Dictionary newFrom: {
+			'response' -> (attempt = 1 ifTrue: [ '' ] ifFalse: [ attempt printString ]).
+			'done' -> true. 'eval_count' -> 1 } ].
+	CooLLMCandidateSampler vocabularyOverride: (Set new in: [ :names |
+		#('new' 'yourself' 'OrderedCollection' 'Set') do: [ :target |
+			2 to: (target size min: 8) do: [ :size |
+				| prefix |
+				prefix := target first: size.
+				names add: prefix.
+				2 to: 10 do: [ :index | names add: prefix , index printString ] ] ].
+		names ]).
 	fixture := (Object << #CooPublicationFixture) package: 'CooPublication-Fixture'; install.
-	fixture compile: 'example ^ OrderedCollection new. Smalltalk yourself'.
+	"Pharo 14 rejects statements after a return, so the return comes last."
+	fixture compile: 'example OrderedCollection new. ^ Smalltalk yourself'.
 	fixture class compile: 'classExample ^ Set new'
 ]
 
 { #category : 'running' }
 CooPublicationTest >> tearDown [
 	CooLLMClient default: previousClient.
+	CooLLMCandidateSampler vocabularyOverride: nil.
 	fixture ifNotNil: [ fixture removeFromSystem ].
 	PackageOrganizer default removePackage: 'CooPublication-Fixture'.
 	super tearDown
@@ -32,6 +50,7 @@ CooPublicationTest >> comparison [
 
 { #category : 'tests' }
 CooPublicationTest >> testFourModelsUseSameOneTokenRequestsAndPopulations [
+	"No prefix is skipped here, so LM populations equal the heuristic ones."
 	| comparison defaultModel |
 	defaultModel := CooLLMClient default model.
 	comparison := self comparison.
@@ -39,14 +58,13 @@ CooPublicationTest >> testFourModelsUseSameOneTokenRequestsAndPopulations [
 		| run reference |
 		run := (comparison at: kind) first first.
 		self assert: run results keys asSet equals: CooBenchmarkChart publicationStrategies asSet.
-		reference := (run results at: #llm05B) records collect: [ :record |
-			(record at: #generation) at: #request ].
+		reference := (run results at: #llm05B) records collect: [ :record | record at: #request ].
 		CooBenchRunner llmModels keysAndValuesDo: [ :strategy :model |
 			| benchmark |
 			benchmark := run results at: strategy.
 			benchmark records withIndexDo: [ :record :index |
 				| request |
-				request := (record at: #generation) at: #request.
+				request := record at: #request.
 				self assert: (request at: 'model') equals: model.
 				self assert: ((request at: 'options') at: 'num_predict') equals: 1.
 				self assert: (request at: 'prompt') equals: ((reference at: index) at: 'prompt') ].
@@ -232,25 +250,24 @@ CooPublicationTest >> testEligiblePackagesExcludePackagesWithoutBenchmarkMethods
 ]
 
 { #category : 'tests' }
-CooPublicationTest >> testHybridsMatchPureLMRequestsAndAllStrategyPopulations [
+CooPublicationTest >> testHybridsRerankDependencyCandidatesOnTheSamePopulation [
 	| comparison |
 	comparison := self comparison.
 	#(messages variables) do: [ :kind |
 		| run dependency |
 		run := (comparison at: kind) first first.
 		dependency := run results at: #heuristicsDependency.
-		#(hybrid05B hybrid15B hybrid3B hybrid7B) with: #(llm05B llm15B llm3B llm7B) do: [ :hybridKey :lmKey |
-			| hybrid lm |
+		#(hybrid05B hybrid15B hybrid3B hybrid7B) do: [ :hybridKey |
+			| hybrid |
 			hybrid := run results at: hybridKey.
-			lm := run results at: lmKey.
-			self assert: hybrid records size equals: lm records size.
-			hybrid records with: lm records do: [ :h :l |
-				self assert: (h at: #snapshot) equals: (l at: #snapshot).
-				self assert: ((h at: #generation) at: #request) equals: ((l at: #generation) at: #request) ].
+			hybrid records do: [ :record |
+				self assert: (record at: #finalCandidates) asSet
+					equals: (record at: #heuristicCandidates) asSet ].
 			2 to: 8 do: [ :prefix |
 				self assert: (hybrid totalEntriesPerPrefixSize: prefix) equals: (dependency totalEntriesPerPrefixSize: prefix).
-				self assert: (hybrid totalEntriesPerPrefixSize: prefix) equals: (lm totalEntriesPerPrefixSize: prefix).
-				"Reusing dependency builders preserves the actual heuristic ranking too."
+				"Reranking keeps the dependency candidate set, so top-ten recall is equal."
+				self assert: (hybrid accuracyForCompletionIndex: (1 to: 10) withPrefixSize: prefix)
+					equals: (dependency accuracyForCompletionIndex: (1 to: 10) withPrefixSize: prefix).
 				self assert: ((hybrid records select: [ :record | (record at: #prefix) size = prefix ])
 					count: [ :record | (record at: #heuristicRank) > 0 ])
 					equals: ((dependency accuracyForCompletionIndex: (1 to: 10) withPrefixSize: prefix)
@@ -327,7 +344,7 @@ CooPublicationTest >> testSixOriginalRowsPlusFiveRankingRows [
 		self assert: (latex includesSubstring: '\multirow{11}{*}{\textbf{Methods}}').
 		self assert: (latex includesSubstring: '\multirow{11}{*}{\textbf{Classes}}').
 		self assert: (latex includesSubstring: '& NeuralRank-20 & -- & --').
-		self deny: (latex includesSubstring: '& Hybrid Dependency').
+		self deny: (latex includesSubstring: '& Hybrid Rerank').
 		self assert: transport requests size equals: requests.
 		self assert: folder children size equals: 3
 	] ensure: [ folder ensureDeleteAll ]

@@ -23,135 +23,100 @@ CooHybridBenchmarksTest >> messageIn: source [
 
 { #category : 'helpers' }
 CooHybridBenchmarksTest >> variableNode [
-	^ ((OCParser parseMethod: 'example ^ OrderedCollection new. HiddenAfterCursor new')
+	^ ((OCParser parseMethod: 'example OrderedCollection new. ^ HiddenAfterCursor new')
 		methodClass: self class; yourself) allChildren
 		detect: [ :node | node isVariable and: [ node name = 'OrderedCollection' ] ]
 ]
 
 { #category : 'helpers' }
-CooHybridBenchmarksTest >> respondWith: text [
-	transport responseBlock: [ :payload | Dictionary newFrom: {
-		'response' -> text. 'done' -> true. 'eval_count' -> (text ifEmpty: [ 0 ] ifNotEmpty: [ 1 ]) } ]
+CooHybridBenchmarksTest >> sizeTokens [
+	"After the typed si: size -0.3, sizeInMemory -1.75, sign -2.1."
+	^ Dictionary newFrom: {
+		'' -> { 'ze' -> -0.1. 'gn' -> -2.0 }.
+		'ze' -> { ' ' -> -0.2. 'In' -> -1.5 }.
+		'gn' -> { '.' -> -0.1 }.
+		'zeIn' -> { 'Memory' -> -0.1 }.
+		'zeInMemory' -> { ' ' -> -0.05 } }
 ]
 
 { #category : 'helpers' }
-CooHybridBenchmarksTest >> benchSizeWith: names response: text [
+CooHybridBenchmarksTest >> benchSizeWith: names [
+	"Answers the record of prefix si."
 	builder names: names.
-	self respondWith: text.
 	benchmark benchCallsite: (self messageIn: 'example ^ self size') atPosition: 0.
-	^ benchmark records first
+	^ benchmark records at: benchmark records size - 2
 ]
 
 { #category : 'tests' }
-CooHybridBenchmarksTest >> testFusionInsertsLMFirstAndRemovesAllDuplicates [
-	| result |
-	result := benchmark fuseHeuristicCandidates: #('sizeInMemory' 'size' 'species' 'species') withLLMCandidate: 'size'.
-	self assert: result asArray equals: #('size' 'sizeInMemory' 'species')
-]
-
-{ #category : 'tests' }
-CooHybridBenchmarksTest >> testFusionIsBoundedAndDoesNotMutateInputs [
-	| names result |
-	names := (1 to: 10) collect: [ :index | 'candidate', index asString ].
-	result := benchmark fuseHeuristicCandidates: names withLLMCandidate: 'other'.
-	self assert: result size equals: 10.
-	self assert: result first equals: 'other'.
-	self assert: result last equals: 'candidate9'.
-	self assert: names last equals: 'candidate10'.
-	self assert: (benchmark fuseHeuristicCandidates: #() withLLMCandidate: '') isEmpty
-]
-
-{ #category : 'tests' }
-CooHybridBenchmarksTest >> testCorrectLMPromotesTarget [
+CooHybridBenchmarksTest >> testModelPromotesTargetWithinHeuristicList [
 	| record |
-	record := self benchSizeWith: #('signed' 'sin' 'sizeInMemory' 'size') response: 'ze'.
-	self assert: (record at: #heuristicRank) equals: 4.
+	transport nextTokens: self sizeTokens.
+	record := self benchSizeWith: #('sizeInMemory' 'sign' 'size').
+	self assert: (record at: #heuristicCandidates) equals: #('sizeInMemory' 'sign' 'size').
+	self assert: (record at: #finalCandidates) equals: #('size' 'sizeInMemory' 'sign').
+	self assert: (record at: #heuristicRank) equals: 3.
 	self assert: (record at: #rank) equals: 1.
-	self assert: (record at: #lmPromotes).
-	self assert: (record at: #duplicateLM).
+	self assert: (record at: #promoted).
+	self deny: (record at: #demoted).
+	self assert: ((record at: #scores) at: 'size') closeTo: -0.3.
+	self assert: (record at: #requests) equals: #('' 'ze' 'gn' 'zeIn' 'zeInMemory').
 	self assert: (benchmark mmrForPrefixSize: 2) equals: 1
 ]
 
 { #category : 'tests' }
-CooHybridBenchmarksTest >> testWrongLMDemotesTarget [
+CooHybridBenchmarksTest >> testModelCanDemoteTarget [
 	| record |
-	record := self benchSizeWith: #('size' 'sizeInMemory') response: 'gnedIntFromLong'.
+	transport nextTokens: (Dictionary newFrom: {
+		'' -> { 'gn' -> -0.1. 'ze' -> -2.0 }.
+		'gn' -> { ' ' -> -0.1 }.
+		'ze' -> { ' ' -> -0.1 } }).
+	record := self benchSizeWith: #('size' 'sign').
+	self assert: (record at: #finalCandidates) equals: #('sign' 'size').
 	self assert: (record at: #rank) equals: 2.
-	self assert: (record at: #lmHarms).
-	self assert: (record at: #heuristicOnlySucceeds).
+	self assert: (record at: #demoted).
 	self assert: (benchmark mmrForPrefixSize: 2) equals: 0.5
 ]
 
 { #category : 'tests' }
-CooHybridBenchmarksTest >> testCorrectDuplicateDoesNotDemoteTarget [
+CooHybridBenchmarksTest >> testRerankingNeverAddsOrDropsCandidates [
 	| record |
-	record := self benchSizeWith: #('size' 'sizeInMemory') response: 'ze'.
-	self assert: (record at: #rank) equals: 1.
-	self assert: (record at: #lmAgrees).
-	self assert: (record at: #unchanged).
-	self deny: (record at: #lmHarms)
-]
-
-{ #category : 'tests' }
-CooHybridBenchmarksTest >> testRankTenEvictionIsHarmAndUnionStillCountsIt [
-	| names record |
-	names := ((1 to: 9) collect: [ :index | 'size', index asString ]), #('size').
-	record := self benchSizeWith: names response: 'gned'.
-	self assert: (record at: #heuristicRank) equals: 10.
+	transport nextTokens: self sizeTokens.
+	record := self benchSizeWith: #('sign' 'sizeInMemory' 'sin' 'sizeInMemory').
+	benchmark records do: [ :each |
+		self assert: (each at: #finalCandidates) asSet equals: (each at: #heuristicCandidates) asSet ].
 	self assert: (record at: #rank) equals: 0.
-	self assert: (record at: #lmHarms).
-	self assert: (record at: #unionHit)
+	self assert: (record at: #heuristicMiss).
+	self assert: (record at: #unchanged).
+	self assert: (benchmark diagnosticSummary at: #heuristicMiss) equals: 3
 ]
 
 { #category : 'tests' }
-CooHybridBenchmarksTest >> testLMRescueAndBothMiss [
-	| record |
-	record := self benchSizeWith: #() response: 'ze'.
-	self assert: (record at: #lmRescues).
-	self assert: (record at: #rank) equals: 1.
-	self deny: (record at: #bothMiss).
-	self assert: (benchmark records second at: #bothMiss).
-	self assert: (benchmark diagnosticSummary at: #lmRescues) equals: 1.
-	self assert: (benchmark diagnosticSummary at: #bothMiss) equals: 2.
-	self assert: (benchmark diagnosticSummary at: #unionAccuracy) equals: (1 / 3.0)
+CooHybridBenchmarksTest >> testFinalListIsTruncatedToTen [
+	| names |
+	names := (1 to: 12) collect: [ :index | 'size', index printString ].
+	builder names: names.
+	benchmark benchCallsite: (self messageIn: 'example ^ self size') atPosition: 0.
+	self assert: (benchmark records last at: #finalCandidates) size equals: 10
 ]
 
 { #category : 'tests' }
-CooHybridBenchmarksTest >> testEmptyGenerationPreservesHeuristicsEvenAtCompletePrefix [
-	self benchSizeWith: #('sizeInMemory' 'size') response: ''.
-	benchmark records do: [ :record |
-		self assert: (record at: #lmCandidate) equals: ''.
-		self assert: (record at: #finalCandidates) asArray equals: #('sizeInMemory' 'size').
-		self assert: (record at: #rank) equals: 2 ].
-	self assert: transport requests size equals: 3
-]
-
-{ #category : 'tests' }
-CooHybridBenchmarksTest >> testWhitespaceAndExtraCodeAreInsertedVerbatim [
-	#('ze ' 'ze. self new') do: [ :text |
-		| record |
-		self benchSizeWith: #('size') response: text.
-		record := benchmark records at: benchmark records size - 2.
-		self assert: (record at: #lmCandidate) equals: 'si', text.
-		self assert: (record at: #finalCandidates) first equals: 'si', text.
-		self assert: (record at: #rank) equals: 2 ]
-]
-
-{ #category : 'tests' }
-CooHybridBenchmarksTest >> testMessageSnapshotUsesFIMSuffixAndOmitsTargetAndCandidates [
+CooHybridBenchmarksTest >> testMessagePromptListsCandidatesAndOmitsTarget [
 	| node |
-	node := self messageIn: 'example ^ self secretCompletion. HiddenAfterCursor new'.
-	builder names: #('secretHeuristicCandidate').
+	node := self messageIn: 'example self secretCompletion. ^ HiddenAfterCursor new'.
+	builder names: #('seHeuristicCandidate' 'seOther').
 	benchmark benchCallsite: node atPosition: node start.
+	self assert: transport requests notEmpty.
 	transport requests do: [ :request |
 		self deny: ((request at: 'prompt') includesSubstring: 'secretCompletion').
-		self assert: ((request at: 'prompt') endsWith:
-			'<|fim_suffix|>. HiddenAfterCursor new<|fim_middle|>').
-		self deny: ((request at: 'prompt') includesSubstring: 'secretHeuristicCandidate').
+		self assert: ((request at: 'prompt') includesSubstring: '"Completion candidates: seHeuristicCandidate seOther"').
+		self assert: ((request at: 'prompt') includesSubstring:
+			'<|fim_suffix|>. ^ HiddenAfterCursor new<|fim_middle|>').
+		self assert: (request at: 'logprobs').
 		self assert: ((request at: 'options') at: 'num_predict') equals: 1.
 		self assert: ((request at: 'options') at: 'temperature') equals: 0 ].
-	self assert: node selector equals: #secretCompletion.
-	self assert: transport requests size equals: 7
+	self assert: ((benchmark records first at: #snapshot) at: #contextPolicy) equals: 'fim-structural-v1'.
+	self assert: (benchmark records first at: #contextPolicy) equals: 'fim-structural-v1+candidates'.
+	self assert: node selector equals: #secretCompletion
 ]
 
 { #category : 'tests' }
@@ -159,21 +124,24 @@ CooHybridBenchmarksTest >> testVariableSnapshotAndContextAndRestoration [
 	| node |
 	node := self variableNode.
 	benchmark kind: #variables.
+	builder names: #('OrSomething' 'OrdOther' 'OrderOther').
 	builder buildBlock: [ :mutated :context |
 		self assert: context class equals: CoBenchmarkVariableContext.
 		self assert: mutated name size <= 8 ].
 	benchmark benchCallsite: node atPosition: node start.
+	self assert: transport requests notEmpty.
 	transport requests do: [ :request |
 		self deny: ((request at: 'prompt') includesSubstring: 'OrderedCollection').
-		self assert: ((request at: 'prompt') endsWith:
-			'<|fim_suffix|> new. HiddenAfterCursor new<|fim_middle|>') ].
-	self assert: node name equals: 'OrderedCollection' 
+		self assert: ((request at: 'prompt') includesSubstring:
+			'<|fim_suffix|> new. ^ HiddenAfterCursor new<|fim_middle|>') ].
+	self assert: node name equals: 'OrderedCollection'
 ]
 
 { #category : 'tests' }
 CooHybridBenchmarksTest >> testKeywordSnapshotOmitsArgumentsAndRestoresSelector [
 	| node |
 	node := self messageIn: 'example ^ self at: secretArgument put: HiddenAfterCursor'.
+	builder names: #('at:' 'at:put:' 'at:ifAbsent:').
 	builder buildBlock: [ :mutated :context | self assert: context class equals: CoBenchmarkContext ].
 	benchmark benchCallsite: node atPosition: node keywordsIntervals first.
 	self assert: ((benchmark records third at: #snapshot) at: #sourcePrefix) equals: 'example ^ self at:p'.
@@ -201,7 +169,8 @@ CooHybridBenchmarksTest >> testBuilderAndFetchFailuresRestoreBothNodeKinds [
 			self should: [ localBenchmark benchCallsite: node atPosition: node start ] raise: Error.
 			self assert: (node isMessage ifTrue: [ node selector ] ifFalse: [ node name ]) equals: original.
 			self assert: (localBenchmark records first includesKey: #error).
-			self assert: (localBenchmark totalEntriesPerPrefixSize: 2) equals: 0 ] ]
+			self assert: (localBenchmark totalEntriesPerPrefixSize: 2) equals: 0 ] ].
+	self assert: transport requests isEmpty
 ]
 
 { #category : 'tests' }
@@ -210,14 +179,15 @@ CooHybridBenchmarksTest >> testModelFailureIsDiagnosticNotMissAndNeverMutatesEit
 	{ self messageIn: 'example ^ self size'. self variableNode } do: [ :node |
 		| original |
 		original := node isMessage ifTrue: [ node selector ] ifFalse: [ node name ].
+		builder names: { original asString }.
 		benchmark kind: (node isMessage ifTrue: [ #messages ] ifFalse: [ #variables ]).
 		self should: [ benchmark benchCallsite: node atPosition: node start ] raise: Error.
 		self assert: (node isMessage ifTrue: [ node selector ] ifFalse: [ node name ]) equals: original ].
 	self assert: (benchmark totalEntriesPerPrefixSize: 2) equals: 0.
 	self assert: (benchmark records first at: #error) equals: 'Connection unavailable'.
+	self assert: (benchmark records first at: #heuristicCandidates) equals: #('size').
 	self assert: (benchmark diagnosticSummary at: #errors) equals: 2.
-	self assert: (benchmark diagnosticSummary at: #count) equals: 0.
-	self assert: (benchmark diagnosticSummary at: #unionAccuracy) isNil
+	self assert: (benchmark diagnosticSummary at: #count) equals: 0
 ]
 
 { #category : 'tests' }
@@ -226,42 +196,52 @@ CooHybridBenchmarksTest >> testInvalidKindIsRejected [
 ]
 
 { #category : 'tests' }
-CooHybridBenchmarksTest >> testRecordsExportIncludesDiagnosticsAndRawGeneration [
+CooHybridBenchmarksTest >> testRecordsExportIncludesScoresAndRequests [
 	| file exported |
-	self benchSizeWith: #('size') response: 'ze'.
+	transport nextTokens: self sizeTokens.
+	self benchSizeWith: #('sizeInMemory' 'sign' 'size').
 	file := FileLocator temp / ('hybrid-', UUID new asString, '.jsonl').
 	[
 		benchmark exportRecordsTo: file.
 		exported := STONJSON fromString: file contents lines first.
 		self assert: (exported at: 'rank') equals: 1.
-		self assert: (exported at: 'duplicateLM').
-		self assert: ((exported at: 'generation') at: 'content') equals: 'ze'
+		self assert: (exported at: 'promoted').
+		self assert: (exported at: 'finalCandidates') equals: #('size' 'sizeInMemory' 'sign').
+		self assert: ((exported at: 'scores') at: 'sign') closeTo: -2.1.
+		self assert: (exported at: 'requests') size equals: 5
 	] ensure: [ file ensureDelete ]
 ]
 
 { #category : 'tests' }
-CooHybridBenchmarksTest >> testSummaryAggregatesUnequalPopulationsAndExcludesFailures [
+CooHybridBenchmarksTest >> testSummaryAggregatesPopulationsAndExcludesFailures [
 	| second failed runs summary |
-	self benchSizeWith: #() response: 'ze'.
+	transport nextTokens: self sizeTokens.
+	self benchSizeWith: #('sizeInMemory' 'sign' 'size').
 	second := CooHybridBenchmarks new client: client;
-		builder: (CooHybridTestBuilder new names: #('super'); yourself); yourself.
+		builder: (CooHybridTestBuilder new names: #('sign' 'super'); yourself); yourself.
 	second benchCallsite: (self messageIn: 'example ^ self super') atPosition: 0.
-	failed := CooHybridBenchmarks new client: client; yourself.
-	transport responseBlock: [ :request | self error: 'Unavailable' ].
+	failed := CooHybridBenchmarks new client: (CooLLMClient new
+			transport: (CooLLMTestTransport new responseBlock: [ :request | self error: 'Unavailable' ]; yourself);
+			yourself);
+		builder: (CooHybridTestBuilder new names: #('size'); yourself); yourself.
 	self should: [ failed benchCallsite: (self messageIn: 'example ^ self size') atPosition: 0 ] raise: Error.
 	runs := { benchmark. second. failed } collect: [ :each |
 		CooBenchRunnerTestBenchStub new results: (Dictionary newFrom: { #hybrid05B -> each }); yourself ].
 	summary := CooBenchmarkChart hybridSummaryFor: #hybrid05B runs: runs.
+	"si: 3 -> 1 by probability. siz: no listed token continues e, so rank 3
+	stays. size and super: once the prefix is the whole name, only the
+	lowest-token bound scores it, which ranks it above the unreached names
+	(size 3 -> 1, super 2 -> 1). su, sup and supe keep rank 2. The failed
+	benchmark adds an error but no observation."
 	self assert: (summary at: #count) equals: 7.
 	self assert: (summary at: #errors) equals: 1.
-	self assert: (summary at: #lmRescues) equals: 1.
-	self assert: (summary at: #lmHarms) equals: 4.
-	self assert: (summary at: #bothMiss) equals: 2.
-	self assert: (summary at: #unionAccuracy) equals: (5 / 7.0).
-	self assert: (summary at: #accuracyAt1) equals: (1 / 7.0).
-	self assert: (summary at: #accuracyAt3) equals: (5 / 7.0).
-	self assert: (summary at: #accuracyAt10) equals: (5 / 7.0).
-	self assert: (summary at: #mrr) closeTo: (3 / 7.0)
+	self assert: (summary at: #promoted) equals: 3.
+	self assert: (summary at: #demoted) equals: 0.
+	self assert: (summary at: #unchanged) equals: 4.
+	self assert: (summary at: #heuristicMiss) equals: 0.
+	self assert: (summary at: #requests) equals: 11.
+	self assert: (summary at: #accuracyAt1) equals: (3 / 7.0).
+	self assert: (summary at: #accuracyAt3) equals: 1.0
 ]
 
 { #category : 'fixtures' }

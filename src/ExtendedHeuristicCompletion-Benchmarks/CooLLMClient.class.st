@@ -1,6 +1,9 @@
 "
 Synchronous benchmark-only Ollama client, following pharo-copilot's raw FIM
-protocol. One request, at most one generated model token. It does not change
+protocol. One request, at most one generated model token. generateFor: is
+greedy (temperature 0, seed 42); a seeded sampled variant serves
+CooLLMCandidateSampler, and topTokensFor:continuation:count: answers the
+next-token log-probabilities that CooLLMBeamReranker searches. It does not change
 Copilot settings, install models, retry failures or fall back to heuristics.
 An optional transport implements postJsonAt:body: (e.g. CoPCOAHttpTransport).
 "
@@ -107,6 +110,11 @@ CooLLMClient >> promptFor: snapshot [
 
 { #category : 'generation' }
 CooLLMClient >> payloadFor: snapshot [
+	^ self payloadFor: snapshot temperature: 0 seed: 42
+]
+
+{ #category : 'generation' }
+CooLLMClient >> payloadFor: snapshot temperature: temperature seed: seed [
 	^ Dictionary new
 		at: 'model' put: model;
 		at: 'prompt' put: (self promptFor: snapshot);
@@ -114,7 +122,7 @@ CooLLMClient >> payloadFor: snapshot [
 		at: 'stream' put: false;
 		at: 'keep_alive' put: '5m';
 		at: 'options' put: (Dictionary newFrom: {
-			'num_predict' -> 1. 'temperature' -> 0. 'seed' -> 42.
+			'num_predict' -> 1. 'temperature' -> temperature. 'seed' -> seed.
 			'num_ctx' -> 8192.
 			'stop' -> #('<|endoftext|>' '<|fim_prefix|>' '<|fim_suffix|>' '<|fim_middle|>' '<|repo_name|>' '<|file_sep|>') });
 		yourself
@@ -122,8 +130,13 @@ CooLLMClient >> payloadFor: snapshot [
 
 { #category : 'generation' }
 CooLLMClient >> generateFor: snapshot [
+	^ self generateFor: snapshot temperature: 0 seed: 42
+]
+
+{ #category : 'generation' }
+CooLLMClient >> generateFor: snapshot temperature: temperature seed: seed [
 	| payload response |
-	payload := self payloadFor: snapshot.
+	payload := self payloadFor: snapshot temperature: temperature seed: seed.
 	response := self postPayload: payload.
 	self validateResponse: response.
 	^ Dictionary new
@@ -131,6 +144,39 @@ CooLLMClient >> generateFor: snapshot [
 		at: #response put: response;
 		at: #template put: template copy;
 		at: #content put: (response at: 'response');
+		yourself
+]
+
+{ #category : 'generation' }
+CooLLMClient >> topTokensFor: snapshot continuation: aString count: count [
+	"One greedy step after prompt , aString. Answers the request and the
+	count most likely next tokens as token -> log-probability associations."
+	| payload response steps |
+	payload := self payloadFor: snapshot.
+	payload
+		at: 'prompt' put: (payload at: 'prompt') , aString;
+		at: 'logprobs' put: true;
+		at: 'top_logprobs' put: count.
+	response := self postPayload: payload.
+	self validateResponse: response.
+	steps := response at: 'logprobs' ifAbsent: [
+		(response at: 'response') ifNotEmpty: [
+			self error: 'Ollama did not return log-probabilities; upgrade the server' ].
+		"Ollama drops log-probabilities when the chosen token prints nothing (an
+		end-of-text or FIM marker). Only its rank is known: report a certain end."
+		^ Dictionary new
+			at: #request put: payload;
+			at: #tokens put: { '' -> 0.0 };
+			at: #endWithoutLogprobs put: true;
+			yourself ].
+	steps ifNil: [ steps := #() ].
+	^ Dictionary new
+		at: #request put: payload;
+		at: #endWithoutLogprobs put: false;
+		at: #tokens put: (steps
+			ifEmpty: [ #() ]
+			ifNotEmpty: [ (steps first at: 'top_logprobs') collect: [ :each |
+				(each at: 'token') -> (each at: 'logprob') ] ]) asArray;
 		yourself
 ]
 

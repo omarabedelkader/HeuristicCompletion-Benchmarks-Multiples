@@ -1,6 +1,6 @@
 # HeuristicCompletion-Benchmarks
 
-Compare **Baseline** and **Dependency** with four **one-token LLMs (0.5B, 1.5B, 3B and 7B)**, for message selectors (**Methods**) and class references (**Classes**). Each model also has a **deterministic hybrid** combining its independent prediction with the Dependency heuristic top ten. The heuristic candidate builders are unchanged; the Classes evaluation includes only uppercase globals whose resolved value is a class.
+Compare **Baseline** and **Dependency** with four **one-token LLMs (0.5B, 1.5B, 3B and 7B)**, for message selectors (**Methods**) and class references (**Classes**). Each model also has a **hybrid** that reranks the Dependency heuristic top ten by the model's probabilities, found with beam search. The heuristic candidate builders are unchanged; the Classes evaluation includes only uppercase globals whose resolved value is a class.
 
 ## Load
 
@@ -155,15 +155,25 @@ runner run.
 
 To run only the original strategies, use `others: #(heuristicsDependency)` in that example.
 
-## Deterministic hybrid and diagnostics
+## Hybrid: heuristic candidates reranked by the LM (beam search)
 
-`CooHybridBenchmarks` reuses the runners' `dependencyBuilder` configurations. For each original callsite and prefix it constructs the same `CooLLMContextSnapshot`, requests exactly one token, then temporarily changes the AST name to generate the heuristic top ten. `ensure:` restores the original name even if building or enumerating completions fails. The LM receives neither heuristic candidates nor the expected answer.
+The heuristics propose, the model only reorders. For each callsite and prefix, `CooHybridBenchmarks` temporarily changes the AST name to build the Dependency top ten (`ensure:` restores it), then hands that list, the usual `CooLLMContextSnapshot` and the typed prefix to `CooLLMBeamReranker`. The prompt is the standard FIM prompt whose context also carries the list as a comment, `"Completion candidates: size sign sizeInMemory"` (context policy `fim-structural-v1+candidates`). The expected answer is never sent.
 
-Fusion is `unique([lmCandidate] + heuristicCandidates)[:10]`, preserving order. Nonempty generation becomes exactly `prefix , content`, including whitespace or extra code. **Empty generated text inserts nothing**, even when the prefix already equals the target. This is an explicit fusion abstention policy: the unchanged pure LM baseline still scores `prefix , ''` against the target. There is no validation, repair, retry, learned weighting or target-aware fallback.
+The model does not write a ranking; the reranker reads its preferences as probabilities. A candidate's score is the log-probability that the model types the rest of the name after the prefix and then stops:
 
-The additional strategies, in publication order after the pure LMs, are `hybrid05B`, `hybrid15B`, `hybrid3B`, and `hybrid7B`, labeled “Hybrid Dependency + [size]”. Each uses the corresponding entry in `CooBenchRunner llmModels`. Hybrid time and Pharo memory deltas cover the entire operation, including context creation, inference, heuristics, fusion and recordkeeping. External Ollama RAM/VRAM is not measured.
+```
+score(sizeInMemory | "si") = log P("ze") + log P("In" | "ze") + log P("Memory" | "zeIn") + log P(name ends | "zeInMemory")
+```
 
-Records include `expected`, `prefix`, `snapshot`, `generation`, `lmCandidate`, `heuristicCandidates`, `finalCandidates`, `heuristicRank`, `hybridRank`, `rank`, and `lmCorrect`. Failed operations retain an `error` and propagate the exception without scoring a miss. JSONL export works like the pure LM export:
+Ollama cannot score a given string, but it does return the top twenty next tokens with log-probabilities (`logprobs`, `top_logprobs`; server 0.12 or later). The reranker therefore runs a **beam search** over those tokens. It starts from the empty text after the prefix. At each step, for each kept text, it makes one request with `num_predict: 1`, `temperature: 0` and the text appended after `<|fim_middle|>`. It keeps only extensions that still spell an unscored candidate, and only the five most probable texts survive the step (`beamWidth:`, `topTokens:`, `maxSteps:`; defaults 5, 20, 12).
+
+- **End of name.** A candidate is scored when a token completes it and the next character cannot continue a name (space, `.`, `)`, an end marker, etc.). Without this factor `at:` could never lose to `at:put:`. When no listed token ends the name, the lowest listed log-probability bounds the unlisted ones.
+- **Invisible end tokens.** When the model's top token prints nothing (an end-of-text or FIM marker), Ollama returns no probabilities for that step. The reranker counts that step as a certain end and records it in `endsWithoutLogprobs`. A server that ignores log-probabilities entirely raises an error.
+- **Result.** Scored candidates by score, then unreached candidates (outside the beam, or not starting with the exact prefix) in heuristic order. The list is a permutation of the heuristic list, so **top-ten recall equals Dependency's**; only ranks move.
+
+Strategies `hybrid05B`, `hybrid15B`, `hybrid3B` and `hybrid7B` are labeled “Hybrid Rerank + [size]” and use the models in `CooBenchRunner llmModels`. Cost per prefix is one request per kept text per step (typically 5–30, versus one for a pure LM). Ollama reuses the cached prompt prefix across these requests. Hybrid time and Pharo memory cover context creation, heuristics, every request and the ranking. External Ollama RAM/VRAM is not measured.
+
+Records include `expected`, `prefix`, `snapshot`, `contextPolicy`, `heuristicCandidates`, `finalCandidates`, `scores` (candidate → log-probability), `requests` (the text appended for each request), `steps`, `endsWithoutLogprobs`, `heuristicRank`, `hybridRank`, `rank`, and the flags `promoted`, `demoted`, `unchanged` and `heuristicMiss` (reranking cannot rescue a heuristic miss). Failed operations retain an `error` and propagate the exception without scoring a miss.
 
 ```smalltalk
 | runs hybrid summary |
@@ -174,18 +184,7 @@ summary := CooBenchmarkChart hybridSummaryFor: #hybrid05B runs: runs.
 summary inspect.
 ```
 
-The summary reports observation-weighted MRR, Accuracy@1/@3/@10, and these **overlapping diagnostic counts**:
-
-- `lmRescues`: heuristic miss, inserted LM candidate correct.
-- `lmPromotes`: heuristic target below rank one, LM correct.
-- `lmAgrees` / `duplicateLM`: the inserted LM candidate was already in the heuristic list (whether correct or wrong).
-- `lmHarms`: the target moves down, including eviction from rank ten to a miss.
-- `bothMiss`: neither candidate source contains the target.
-- `heuristicOnlySucceeds`: heuristics contain the target and the LM candidate is not correct.
-- `unchanged`: target rank is unchanged.
-- `unionHit` / `unionAccuracy`: target present in either candidate source **before truncation**. This is an analytical coverage upper bound, not a deployable strategy or an MRR score. Empty generation supplies no candidate under this fusion policy.
-
-Counts describe the target rank or candidate overlap; they are not mutually exclusive categories. Summaries exclude failed events from accuracy denominators and count them separately as `errors`. Missing accuracy is `nil`, not zero.
+The summary reports observation-weighted MRR, Accuracy@1/@3/@10, `count`, `errors`, `promoted`, `demoted`, `unchanged`, `heuristicMiss`, total `requests` and `meanRequests` per observation. Failed events are excluded from accuracy denominators. Missing values are `nil`, not zero.
 
 For any strategy, including both baselines, use `CooBenchmarkChart accuracyAt: 3 for: #heuristicsDependency runs: runs`. Per-prefix top-k accuracy remains available through `accuracyForCompletionIndex: (1 to: 3) withPrefixSize: 2`. `CooBenchmarkChart performancePointFor: #hybrid05B runs: runs` supplies weighted mean latency and memory; compare with `#heuristicsDependency` to compute the added cost. The three default publication artifacts remain MRR, memory/latency, and corpus counts; diagnostic exports are explicit.
 

@@ -66,10 +66,10 @@ CooBenchmarkChart class >> labelFor: strategy [
 		#llm15B -> '1.5B-LLM Completion'.
 		#llm3B -> '3B-LLM Completion'.
 		#llm7B -> '7B-LLM Completion'.
-		#hybrid05B -> 'Hybrid Dependency + 0.5B'.
-		#hybrid15B -> 'Hybrid Dependency + 1.5B'.
-		#hybrid3B -> 'Hybrid Dependency + 3B'.
-		#hybrid7B -> 'Hybrid Dependency + 7B'.
+		#hybrid05B -> 'Hybrid Rerank + 0.5B'.
+		#hybrid15B -> 'Hybrid Rerank + 1.5B'.
+		#hybrid3B -> 'Hybrid Rerank + 3B'.
+		#hybrid7B -> 'Hybrid Rerank + 7B'.
 		#neuralRank10 -> 'NeuralRank-10'.
 		#neuralRank20 -> 'NeuralRank-20'.
 		#neuralRank30 -> 'NeuralRank-30'.
@@ -397,7 +397,7 @@ CooBenchmarkChart class >> accuracyAt: k for: strategy runs: runs [
 CooBenchmarkChart class >> hybridSummaryFor: strategy runs: runs [
 	"Aggregate counts, never per-package percentages. No additional inference."
 	| summary keys |
-	keys := #(count errors lmRescues lmPromotes lmAgrees duplicateLM lmHarms bothMiss heuristicOnlySucceeds unchanged unionHit).
+	keys := #(count errors requests promoted demoted unchanged heuristicMiss).
 	summary := Dictionary new.
 	keys do: [ :key | summary at: key put: 0 ].
 	runs do: [ :run |
@@ -405,8 +405,8 @@ CooBenchmarkChart class >> hybridSummaryFor: strategy runs: runs [
 			| diagnostic |
 			diagnostic := benchmark diagnosticSummary.
 			keys do: [ :key | summary at: key put: (summary at: key) + (diagnostic at: key) ] ] ].
-	summary at: #unionAccuracy put: ((summary at: #count) = 0
-		ifTrue: [ nil ] ifFalse: [ (summary at: #unionHit) / (summary at: #count) asFloat ]);
+	summary at: #meanRequests put: ((summary at: #count) = 0
+		ifTrue: [ nil ] ifFalse: [ (summary at: #requests) / (summary at: #count) asFloat ]);
 		at: #mrr put: (self averageMrrFor: strategy runs: runs);
 		at: #accuracyAt1 put: (self accuracyAt: 1 for: strategy runs: runs);
 		at: #accuracyAt3 put: (self accuracyAt: 3 for: strategy runs: runs);
