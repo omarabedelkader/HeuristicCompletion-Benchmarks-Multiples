@@ -228,19 +228,19 @@ CooHybridBenchmarksTest >> testSummaryAggregatesPopulationsAndExcludesFailures [
 	runs := { benchmark. second. failed } collect: [ :each |
 		CooBenchRunnerTestBenchStub new results: (Dictionary newFrom: { #hybrid05B -> each }); yourself ].
 	summary := CooBenchmarkChart hybridSummaryFor: #hybrid05B runs: runs.
-	"si: 3 -> 1 by probability. siz: no listed token continues e, so rank 3
-	stays. size and super: once the prefix is the whole name, only the
-	lowest-token bound scores it, which ranks it above the unreached names
-	(size 3 -> 1, super 2 -> 1). su, sup and supe keep rank 2. The failed
-	benchmark adds an error but no observation."
+	"si: 3 -> 1 by probability. siz and size: no listed token continues them,
+	so the names continuing the prefix share the lowest-token bound and keep
+	their order, ahead of sign, which does not continue it (3 -> 2). su to
+	super: only super continues the prefix (2 -> 1). The failed benchmark adds
+	an error but no observation."
 	self assert: (summary at: #count) equals: 7.
 	self assert: (summary at: #errors) equals: 1.
-	self assert: (summary at: #promoted) equals: 3.
+	self assert: (summary at: #promoted) equals: 7.
 	self assert: (summary at: #demoted) equals: 0.
-	self assert: (summary at: #unchanged) equals: 4.
+	self assert: (summary at: #unchanged) equals: 0.
 	self assert: (summary at: #heuristicMiss) equals: 0.
 	self assert: (summary at: #requests) equals: 11.
-	self assert: (summary at: #accuracyAt1) equals: (3 / 7.0).
+	self assert: (summary at: #accuracyAt1) equals: (5 / 7.0).
 	self assert: (summary at: #accuracyAt3) equals: 1.0
 ]
 

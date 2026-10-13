@@ -1,8 +1,8 @@
 "
 Dependency heuristics propose the candidates; the language model only
 reorders them. The heuristic top ten, the code context and the list itself go
-to CooLLMBeamReranker, which scores every name by beam search over the
-model's next-token log-probabilities. The final list is a permutation of the
+to CooLLMBeamReranker, which scores every name from the model's next-token
+log-probabilities, without pruning. The final list is a permutation of the
 heuristic list, so the hybrid never gains or loses a candidate: it can only
 promote or demote the target. Targets are used only for scoring and
 post-ranking diagnostics.
@@ -118,6 +118,7 @@ CooHybridBenchmarks >> benchCallsite: node atPosition: position [
 		record
 			at: #finalCandidates put: final;
 			at: #scores put: (rerank at: #scores);
+			at: #bounded put: (rerank at: #bounded);
 			at: #requests put: (rerank at: #requests);
 			at: #steps put: (rerank at: #steps);
 			at: #endsWithoutLogprobs put: (rerank at: #endsWithoutLogprobs);

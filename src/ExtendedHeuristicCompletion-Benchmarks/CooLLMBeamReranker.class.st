@@ -1,28 +1,34 @@
 "
 Reorders a heuristic candidate list by the model's probability of each name,
-found by beam search over next-token log-probabilities.
+read from its next-token log-probabilities. Every candidate that continues the
+typed prefix gets a score; no path is pruned.
 
 The prompt is the usual FIM snapshot whose context also lists the candidates.
 Each beam is text generated after the typed prefix. A step asks the model for
-its top tokens after prompt , beam text and keeps a token only while the text
-still continues some unfinished candidate. Only the beamWidth best texts
-survive a step. A candidate is finished, with score
+its top tokens after prompt , beam text and follows every token while the text
+still continues some unfinished candidate. A candidate is finished, with score
 	log P(rest of name) + log P(name ends here)
 when a token completes it and continues with a non-name character (or the
 model ends). Without the end factor a name would never lose to its own
-extension (at: against at:put:). When the model lists no ending token, the
-lowest listed log-probability bounds the unlisted ones. Ollama gives no
-probabilities when its top token is an invisible end marker; that step counts
-as a certain end and is reported in endsWithoutLogprobs.
+extension (at: against at:put:).
 
-The answer is a permutation of the input: finished names by score, then the
-names the beam never reached in their original order. Nothing is added or
-removed, so top-ten recall equals the heuristic's. The target is never seen.
+The model lists only its topTokens most likely tokens. When the token a
+candidate needs (its next piece, or its end) is not listed, its probability is
+below every listed one: the candidate is scored with the lowest listed
+log-probability at that point, an upper bound, and reported in #bounded. On a
+tie an exact score ranks before a bound. Ollama gives no probabilities when its
+top token is an invisible end marker; that step counts as a certain end and is
+reported in endsWithoutLogprobs.
+
+The answer is a permutation of the input: scored names by score, then the
+names that do not continue the prefix in their original order. Nothing is
+added or removed, so top-ten recall equals the heuristic's. The target is
+never seen.
 "
 Class {
 	#name : 'CooLLMBeamReranker',
 	#superclass : 'Object',
-	#instVars : [ 'client', 'kind', 'beamWidth', 'topTokens', 'maxSteps' ],
+	#instVars : [ 'client', 'kind', 'topTokens', 'maxSteps' ],
 	#category : 'ExtendedHeuristicCompletion-Benchmarks-Hybrid',
 	#package : 'ExtendedHeuristicCompletion-Benchmarks',
 	#tag : 'Hybrid'
@@ -37,7 +43,6 @@ CooLLMBeamReranker class >> contextPolicy [
 CooLLMBeamReranker >> initialize [
 	super initialize.
 	kind := #messages.
-	beamWidth := 5.
 	topTokens := 20.
 	maxSteps := 12
 ]
@@ -50,11 +55,6 @@ CooLLMBeamReranker >> client: aClient [
 { #category : 'accessing' }
 CooLLMBeamReranker >> kind: aSymbol [
 	kind := aSymbol
-]
-
-{ #category : 'accessing' }
-CooLLMBeamReranker >> beamWidth: anInteger [
-	beamWidth := anInteger
 ]
 
 { #category : 'accessing' }
@@ -109,9 +109,15 @@ CooLLMBeamReranker >> endMassOf: remainder name: aName beam: beam tokens: tokens
 	^ mass
 ]
 
+{ #category : 'scoring' }
+CooLLMBeamReranker >> floorOf: tokens [
+	"Unlisted tokens are less likely than every listed one."
+	^ tokens inject: 0 into: [ :min :token | min min: token value ]
+]
+
 { #category : 'ranking' }
 CooLLMBeamReranker >> rerank: candidates prefix: prefix snapshot: snapshot [
-	| unique remainders prompt finished requests beams steps scored blindEnds |
+	| unique remainders prompt finished bounds requests beams steps scored blindEnds |
 	unique := OrderedCollection new.
 	candidates do: [ :each | (unique includes: each) ifFalse: [ unique add: each ] ].
 	unique := unique asArray.
@@ -120,6 +126,8 @@ CooLLMBeamReranker >> rerank: candidates prefix: prefix snapshot: snapshot [
 		(each beginsWith: prefix) ifTrue: [ remainders at: each put: (each allButFirst: prefix size) ] ].
 	prompt := self snapshot: snapshot listing: unique.
 	finished := Dictionary new.
+	"Unfinished names: the best upper bound seen where the model stopped listing them."
+	bounds := Dictionary new.
 	requests := OrderedCollection new.
 	beams := remainders ifEmpty: [ #() ] ifNotEmpty: [ { '' -> 0 } ].
 	steps := 0.
@@ -129,35 +137,55 @@ CooLLMBeamReranker >> rerank: candidates prefix: prefix snapshot: snapshot [
 		steps := steps + 1.
 		expansions := Dictionary new.
 		beams do: [ :beam |
-			| answer tokens |
+			| answer tokens continued |
 			answer := client topTokensFor: prompt continuation: beam key count: topTokens.
 			tokens := answer at: #tokens.
 			(answer at: #endWithoutLogprobs ifAbsent: [ false ]) ifTrue: [ blindEnds := blindEnds + 1 ].
 			requests add: beam key.
 			self finish: beam tokens: tokens remainders: remainders into: finished.
+			continued := Set new.
 			tokens do: [ :token |
-				| text score |
+				| text score names |
 				text := beam key , token key.
 				score := beam value + token value.
-				(token key notEmpty and: [
-					remainders keys anySatisfy: [ :name |
-						(finished includesKey: name) not and: [ (remainders at: name) beginsWith: text ] ] ])
-					ifTrue: [ expansions at: text put: ((expansions at: text ifAbsent: [ score ]) max: score) ] ] ].
+				names := token key
+					ifEmpty: [ #() ]
+					ifNotEmpty: [ remainders keys select: [ :name |
+						(finished includesKey: name) not and: [ (remainders at: name) beginsWith: text ] ] ].
+				names ifNotEmpty: [
+					continued addAll: names.
+					expansions at: text put: ((expansions at: text ifAbsent: [ score ]) max: score) ] ].
+			remainders keysAndValuesDo: [ :name :remainder |
+				((finished includesKey: name) or: [ (continued includes: name) or: [ (remainder beginsWith: beam key) not ] ])
+					ifFalse: [ self bound: name by: beam value + (self floorOf: tokens) in: bounds ] ] ].
 		beams := (expansions associations asSortedCollection: [ :a :b |
-			a value > b value or: [ a value = b value and: [ a key <= b key ] ] ]) asArray.
-		beams := beams first: (beamWidth min: beams size) ].
+			a value > b value or: [ a value = b value and: [ a key <= b key ] ] ]) asArray ].
+	"Names longer than maxSteps tokens: the path so far bounds them."
+	beams do: [ :beam |
+		remainders keysAndValuesDo: [ :name :remainder |
+			((finished includesKey: name) not and: [ remainder beginsWith: beam key ])
+				ifTrue: [ self bound: name by: beam value in: bounds ] ] ].
+	bounds := bounds associations reject: [ :each | finished includesKey: each key ].
+	bounds do: [ :each | finished at: each key put: each value ].
+	bounds := (bounds collect: #key) asSet.
 	scored := (unique select: [ :each | finished includesKey: each ]) withIndexCollect: [ :each :index |
-		{ each. finished at: each. index } ].
+		{ each. finished at: each. (bounds includes: each) ifTrue: [ index + unique size ] ifFalse: [ index ] } ].
 	scored := scored asSortedCollection: [ :a :b |
 		a second > b second or: [ a second = b second and: [ a third <= b third ] ] ].
 	^ Dictionary new
 		at: #ranking put: (scored asArray collect: #first) , (unique reject: [ :each | finished includesKey: each ]);
 		at: #scores put: finished;
+		at: #bounded put: (unique select: [ :each | bounds includes: each ]);
 		at: #requests put: requests asArray;
 		at: #steps put: steps;
 		at: #endsWithoutLogprobs put: blindEnds;
 		at: #contextPolicy put: self class contextPolicy;
 		yourself
+]
+
+{ #category : 'ranking' }
+CooLLMBeamReranker >> bound: name by: score in: bounds [
+	bounds at: name put: ((bounds at: name ifAbsent: [ score ]) max: score)
 ]
 
 { #category : 'ranking' }
@@ -167,8 +195,5 @@ CooLLMBeamReranker >> finish: beam tokens: tokens remainders: remainders into: f
 		(finished includesKey: name) ifFalse: [
 			| mass |
 			mass := self endMassOf: remainder name: name beam: beam tokens: tokens.
-			mass > 0
-				ifTrue: [ finished at: name put: beam value + mass ln ]
-				ifFalse: [ remainder = beam key ifTrue: [
-					finished at: name put: beam value + (tokens inject: 0 into: [ :min :token | min min: token value ]) ] ] ] ]
+			mass > 0 ifTrue: [ finished at: name put: beam value + mass ln ] ] ]
 ]

@@ -63,27 +63,43 @@ CooLLMBeamRerankerTest >> testEndOfNameFactorLetsAnExtensionWin [
 ]
 
 { #category : 'tests' }
-CooLLMBeamRerankerTest >> testBeamWidthPrunesLessLikelyPaths [
-	| table |
-	table := {
-		'' -> { 'ze' -> -0.1. 'gn' -> -0.2 }.
-		'ze' -> { ' ' -> -1.0 }.
-		'gn' -> { ' ' -> -0.1 } }.
-	self assert: ((self rerank: #('size' 'sign') prefix: 'si' tokens: table) at: #ranking)
-		equals: #('sign' 'size').
-	reranker beamWidth: 1.
-	self assert: ((self rerank: #('size' 'sign') prefix: 'si' tokens: table) at: #ranking)
-		equals: #('size' 'sign')
+CooLLMBeamRerankerTest >> testEveryPathIsFollowedWithoutPruning [
+	"More candidates than any beam width: each one still gets an exact score."
+	| names result |
+	names := (1 to: 10) collect: [ :index | 'si' , (Character value: $a asInteger + index - 1) asString ].
+	result := self rerank: names prefix: 'si' tokens: {
+		'' -> ((1 to: 10) collect: [ :index |
+			(Character value: $a asInteger + index - 1) asString -> index negated asFloat ]) } ,
+		((1 to: 10) collect: [ :index |
+			(Character value: $a asInteger + index - 1) asString -> { ' ' -> ((10 - index) negated asFloat * 2) } ]).
+	self assert: (result at: #scores) size equals: 10.
+	self assert: (result at: #bounded) isEmpty.
+	self assert: (result at: #requests) size equals: 11.
+	self assert: (result at: #ranking) equals: names reversed
 ]
 
 { #category : 'tests' }
-CooLLMBeamRerankerTest >> testUnreachedAndForeignNamesKeepHeuristicOrderAfterScoredOnes [
+CooLLMBeamRerankerTest >> testUnlistedNamesAreBoundedAndForeignNamesStayLast [
+	"sip: no listed token starts it. sizeX: the model never lists X after size."
 	| result |
 	result := self rerank: #('Sign' 'sip' 'size' 'sizeX' 'sip') prefix: 'si' tokens: {
-		'' -> { 'ze' -> -0.5 }.
-		'ze' -> { ' ' -> -0.1 } }.
-	self assert: (result at: #ranking) equals: #('size' 'Sign' 'sip' 'sizeX').
-	self assert: (result at: #scores) keys asArray equals: #('size')
+		'' -> { 'ze' -> -0.5. 'x' -> -4.0 }.
+		'ze' -> { ' ' -> -0.1. 'Y' -> -3.0 } }.
+	self assert: (result at: #ranking) equals: #('size' 'sizeX' 'sip' 'Sign').
+	self assert: ((result at: #scores) at: 'size') closeTo: -0.6.
+	self assert: ((result at: #scores) at: 'sizeX') closeTo: -3.5.
+	self assert: ((result at: #scores) at: 'sip') closeTo: -4.0.
+	self assert: (result at: #bounded) equals: #('sip' 'sizeX')
+]
+
+{ #category : 'tests' }
+CooLLMBeamRerankerTest >> testExactScoreRanksBeforeAnEqualBound [
+	| result |
+	result := self rerank: #('sip' 'size') prefix: 'si' tokens: {
+		'' -> { 'ze' -> -0.5. 'x' -> -0.5 }.
+		'ze' -> { ' ' -> 0.0 } }.
+	self assert: ((result at: #scores) at: 'size') equals: ((result at: #scores) at: 'sip').
+	self assert: (result at: #ranking) equals: #('size' 'sip')
 ]
 
 { #category : 'tests' }
@@ -95,7 +111,8 @@ CooLLMBeamRerankerTest >> testMissingEndingTokenIsBoundedByLowestListedToken [
 		'zeAll' -> { '.' -> -0.2 } }.
 	self assert: (result at: #ranking) equals: #('sizeAll' 'size').
 	self assert: ((result at: #scores) at: 'size') closeTo: -2.1.
-	self assert: ((result at: #scores) at: 'sizeAll') closeTo: -0.8
+	self assert: ((result at: #scores) at: 'sizeAll') closeTo: -0.8.
+	self assert: (result at: #bounded) equals: #('size')
 ]
 
 { #category : 'tests' }
