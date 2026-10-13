@@ -1,13 +1,16 @@
 "
-Independent one-token LM generation followed by dependency heuristic completion.
-Fusion is target-blind: unique(LM + heuristic top ten), truncated to ten.
-Empty generated text inserts nothing; all other text is preserved verbatim.
-Targets are used only for scoring and post-prediction diagnostics.
+Dependency heuristics propose the candidates; the language model only
+reorders them. The heuristic top ten, the code context and the list itself go
+to CooLLMBeamReranker, which scores every name by beam search over the
+model's next-token log-probabilities. The final list is a permutation of the
+heuristic list, so the hybrid never gains or loses a candidate: it can only
+promote or demote the target. Targets are used only for scoring and
+post-ranking diagnostics.
 "
 Class {
 	#name : 'CooHybridBenchmarks',
 	#superclass : 'CooStaticBenchmarksMessage',
-	#instVars : [ 'client', 'kind', 'records' ],
+	#instVars : [ 'client', 'kind', 'records', 'reranker' ],
 	#category : 'ExtendedHeuristicCompletion-Benchmarks-Hybrid',
 	#package : 'ExtendedHeuristicCompletion-Benchmarks',
 	#tag : 'Hybrid'
@@ -16,7 +19,7 @@ Class {
 { #category : 'initialization' }
 CooHybridBenchmarks >> initialize [
 	super initialize.
-	name := 'Hybrid (Dependency + LLM)'.
+	name := 'Hybrid (Dependency reranked by LLM)'.
 	client := CooLLMClient default copy.
 	records := OrderedCollection new.
 	self kind: #messages
@@ -24,13 +27,25 @@ CooHybridBenchmarks >> initialize [
 
 { #category : 'accessing' }
 CooHybridBenchmarks >> client: aClient [
-	client := aClient
+	client := aClient.
+	reranker := nil
 ]
 
 { #category : 'accessing' }
 CooHybridBenchmarks >> kind: aSymbol [
 	(#(messages variables) includes: aSymbol) ifFalse: [ self error: 'Unknown completion kind' ].
-	kind := aSymbol
+	kind := aSymbol.
+	reranker := nil
+]
+
+{ #category : 'accessing' }
+CooHybridBenchmarks >> reranker [
+	^ reranker ifNil: [ reranker := CooLLMBeamReranker new client: client; kind: kind; yourself ]
+]
+
+{ #category : 'accessing' }
+CooHybridBenchmarks >> reranker: aReranker [
+	reranker := aReranker
 ]
 
 { #category : 'accessing' }
@@ -77,22 +92,12 @@ CooHybridBenchmarks >> heuristicCandidatesFor: node atPosition: position prefix:
 			ifFalse: [ node name: original ] ]
 ]
 
-{ #category : 'fusion' }
-CooHybridBenchmarks >> fuseHeuristicCandidates: heuristicCandidates withLLMCandidate: lmCandidate [
-	| merged |
-	merged := OrderedCollection new.
-	lmCandidate ifNotEmpty: [ merged add: lmCandidate ].
-	heuristicCandidates do: [ :candidate |
-		(merged includes: candidate) ifFalse: [ merged add: candidate ] ].
-	^ (merged first: (10 min: merged size)) asArray
-]
-
 { #category : 'benchmarks' }
 CooHybridBenchmarks >> benchCallsite: node atPosition: position [
 	| target |
 	target := node isMessage ifTrue: [ node selector asString ] ifFalse: [ node name ].
 	2 to: (target size min: 8) do: [ :size |
-		| prefix snapshot startTime startMemory generation content lmCandidate heuristics final rank record |
+		| prefix snapshot startTime startMemory heuristics rerank final rank record |
 		startTime := self startTimeMeasurement.
 		startMemory := self startMemoryMeasurement.
 		prefix := target first: size.
@@ -102,20 +107,23 @@ CooHybridBenchmarks >> benchCallsite: node atPosition: position [
 			at: #prefix put: prefix; yourself.
 		records add: record.
 		[
-			generation := client generateFor: snapshot.
-			content := generation at: #content.
-			lmCandidate := content ifEmpty: [ '' ] ifNotEmpty: [ prefix , content ].
-			record at: #generation put: generation; at: #lmCandidate put: lmCandidate.
 			heuristics := self heuristicCandidatesFor: node atPosition: position prefix: prefix.
-			final := self fuseHeuristicCandidates: heuristics withLLMCandidate: lmCandidate
+			record at: #heuristicCandidates put: heuristics.
+			rerank := self reranker rerank: heuristics prefix: prefix snapshot: snapshot.
+			final := (rerank at: #ranking) first: (10 min: (rerank at: #ranking) size)
 		] on: Error do: [ :error |
 			record at: #error put: error messageText.
 			error pass ].
 		rank := final indexOf: target.
-		record at: #heuristicCandidates put: heuristics;
-			at: #finalCandidates put: final; at: #rank put: rank;
-			at: #hybridRank put: rank; at: #heuristicRank put: (heuristics indexOf: target);
-			at: #lmCorrect put: (lmCandidate = target).
+		record
+			at: #finalCandidates put: final;
+			at: #scores put: (rerank at: #scores);
+			at: #requests put: (rerank at: #requests);
+			at: #steps put: (rerank at: #steps);
+			at: #endsWithoutLogprobs put: (rerank at: #endsWithoutLogprobs);
+			at: #contextPolicy put: (rerank at: #contextPolicy);
+			at: #rank put: rank; at: #hybridRank put: rank;
+			at: #heuristicRank put: (heuristics indexOf: target).
 		self addDiagnosticsTo: record.
 		self trackCompletionResultsFor: target atIndex: rank withPrefix: prefix.
 		self logMemoryUsageSince: startMemory forPrefixSize: size.
@@ -124,40 +132,29 @@ CooHybridBenchmarks >> benchCallsite: node atPosition: position [
 
 { #category : 'diagnostics' }
 CooHybridBenchmarks >> addDiagnosticsTo: record [
-	"Overlapping flags, computed only after fusion. Rank zero is a miss,
-	so losing rank ten to truncation is also harm."
-	| heuristicRank hybridRank lmCorrect duplicate |
+	"Reranking keeps the candidate set, so a heuristic miss stays a miss."
+	| heuristicRank hybridRank |
 	heuristicRank := record at: #heuristicRank.
 	hybridRank := record at: #hybridRank.
-	lmCorrect := record at: #lmCorrect.
-	duplicate := (record at: #lmCandidate) isNotEmpty and: [
-		(record at: #heuristicCandidates) includes: (record at: #lmCandidate) ].
 	record
-		at: #lmRescues put: (heuristicRank = 0 and: [ lmCorrect ]);
-		at: #lmPromotes put: (heuristicRank > 1 and: [ lmCorrect ]);
-		at: #lmAgrees put: duplicate;
-		at: #duplicateLM put: duplicate;
-		at: #lmHarms put: (heuristicRank > 0 and: [ hybridRank = 0 or: [ hybridRank > heuristicRank ] ]);
-		at: #bothMiss put: (heuristicRank = 0 and: [ lmCorrect not ]);
-		at: #heuristicOnlySucceeds put: (heuristicRank > 0 and: [ lmCorrect not ]);
-		at: #unchanged put: (heuristicRank = hybridRank);
-		at: #unionHit put: (heuristicRank > 0 or: [ lmCorrect ])
+		at: #promoted put: (heuristicRank > 0 and: [ hybridRank < heuristicRank ]);
+		at: #demoted put: (heuristicRank > 0 and: [ hybridRank > heuristicRank ]);
+		at: #unchanged put: heuristicRank = hybridRank;
+		at: #heuristicMiss put: heuristicRank = 0
 ]
 
 { #category : 'diagnostics' }
 CooHybridBenchmarks >> diagnosticSummary [
-	"Union is an analytical candidate-coverage upper bound, never a ranking policy.
-	Failed operations are excluded from scored observations."
+	"Failed operations are excluded from scored observations."
 	| completed summary |
 	completed := records select: [ :record | record includesKey: #rank ].
 	summary := Dictionary new
 		at: #count put: completed size;
 		at: #errors put: (records count: [ :record | record includesKey: #error ]);
+		at: #requests put: (completed inject: 0 into: [ :sum :record | sum + (record at: #requests) size ]);
 		yourself.
-	#(lmRescues lmPromotes lmAgrees duplicateLM lmHarms bothMiss heuristicOnlySucceeds unchanged unionHit)
+	#(promoted demoted unchanged heuristicMiss)
 		do: [ :key | summary at: key put: (completed count: [ :record | record at: key ]) ].
-	summary at: #unionAccuracy put: (completed ifEmpty: [ nil ] ifNotEmpty: [
-		(summary at: #unionHit) / completed size asFloat ]).
 	^ summary
 ]
 
