@@ -77,18 +77,21 @@ CooLLMTestTransport >> nextTokens: aDictionary [
 
 { #category : 'accessing' }
 CooLLMTestTransport >> completeNames: names [
-	"Attempt n (seed 41 + n) answers the rest of names at: n after the typed
-	prefix; a name that does not continue the prefix, or a missing one, answers '?'."
+	"Beam tests: a model that knows only names, the earlier the likelier. After
+	the typed text it answers, for the k-th name continuing that text, the
+	rest of the name with log-probability -k squared; a name typed in full ends
+	with a space."
 	responseBlock := [ :payload |
-		| before start prefix name |
+		| before start typed tokens |
 		before := (payload at: 'prompt') readStream upToAll: '<|fim_suffix|>'.
 		start := before size.
 		[ start > 0 and: [ (before at: start) isAlphaNumeric or: [ (before at: start) = $: ] ] ]
 			whileTrue: [ start := start - 1 ].
-		prefix := before copyFrom: start + 1 to: before size.
-		name := names at: ((payload at: 'options') at: 'seed') - 41 ifAbsent: [ '' ].
+		typed := (before copyFrom: start + 1 to: before size) , (self continuationIn: payload).
+		tokens := ((names select: [ :each | each beginsWith: typed ]) withIndexCollect: [ :each :index |
+			(each = typed ifTrue: [ ' ' ] ifFalse: [ each allButFirst: typed size ]) -> index squared negated asFloat ]) asArray.
 		Dictionary newFrom: {
-			'response' -> ((name beginsWith: prefix)
-				ifTrue: [ name allButFirst: prefix size ] ifFalse: [ '?' ]).
-			'done' -> true. 'eval_count' -> 1 } ]
+			'response' -> (tokens ifEmpty: [ '' ] ifNotEmpty: [ tokens first key ]).
+			'done' -> true. 'eval_count' -> 1.
+			'logprobs' -> (self logprobsFor: tokens) } ]
 ]

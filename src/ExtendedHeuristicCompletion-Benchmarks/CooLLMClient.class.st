@@ -1,9 +1,9 @@
 "
 Synchronous benchmark-only Ollama client, following pharo-copilot's raw FIM
 protocol. One request, at most one generated model token. generateFor: is
-greedy (temperature 0, seed 42); a seeded sampled variant serves
-CooLLMCandidateSampler, and topTokensFor:continuation:count: answers the
-next-token log-probabilities that CooLLMBeamReranker searches. It does not change
+greedy (temperature 0, seed 42), and topTokensFor:continuation:count: answers
+the next-token log-probabilities that CooLLMBeamCompleter and
+CooLLMBeamReranker search. It does not change
 Copilot settings, install models, retry failures or fall back to heuristics.
 An optional transport implements postJsonAt:body: (e.g. CoPCOAHttpTransport).
 "

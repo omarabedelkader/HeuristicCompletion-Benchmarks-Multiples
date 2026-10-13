@@ -12,22 +12,9 @@ CooPublicationTest >> setUp [
 	previousClient := CooLLMClient default.
 	transport := CooLLMTestTransport new.
 	CooLLMClient default: (CooLLMClient new transport: transport; yourself).
-	"Attempt n answers '' then '2'..'10', so every fixture prefix p samples
-	the ten real names p, p2 .. p10."
-	transport responseBlock: [ :payload |
-		| attempt |
-		attempt := ((payload at: 'options') at: 'seed') - 41.
-		Dictionary newFrom: {
-			'response' -> (attempt = 1 ifTrue: [ '' ] ifFalse: [ attempt printString ]).
-			'done' -> true. 'eval_count' -> 1 } ].
-	CooLLMCandidateSampler vocabularyOverride: (Set new in: [ :names |
-		#('new' 'yourself' 'OrderedCollection' 'Set') do: [ :target |
-			2 to: (target size min: 8) do: [ :size |
-				| prefix |
-				prefix := target first: size.
-				names add: prefix.
-				2 to: 10 do: [ :index | names add: prefix , index printString ] ] ].
-		names ]).
+	"Only the fixture's four targets are real names, and the model completes them."
+	transport completeNames: #('new' 'yourself' 'OrderedCollection' 'Set').
+	CooLLMBeamCompleter vocabularyOverride: #('new' 'yourself' 'OrderedCollection' 'Set').
 	fixture := (Object << #CooPublicationFixture) package: 'CooPublication-Fixture'; install.
 	"Pharo 14 rejects statements after a return, so the return comes last."
 	fixture compile: 'example OrderedCollection new. ^ Smalltalk yourself'.
@@ -37,7 +24,7 @@ CooPublicationTest >> setUp [
 { #category : 'running' }
 CooPublicationTest >> tearDown [
 	CooLLMClient default: previousClient.
-	CooLLMCandidateSampler vocabularyOverride: nil.
+	CooLLMBeamCompleter vocabularyOverride: nil.
 	fixture ifNotNil: [ fixture removeFromSystem ].
 	PackageOrganizer default removePackage: 'CooPublication-Fixture'.
 	super tearDown

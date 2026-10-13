@@ -61,7 +61,7 @@ CooBenchmarkChart class >> labelFor: strategy [
 	^ (Dictionary newFrom: {
 		#heuristicsBaseline -> 'Baseline'.
 		#heuristicsDependency -> 'Dependency'.
-		#llmCompletion -> 'LLM (1 model token)'.
+		#llmCompletion -> 'LLM (beam search)'.
 		#llm05B -> '0.5B-LLM Completion'.
 		#llm15B -> '1.5B-LLM Completion'.
 		#llm3B -> '3B-LLM Completion'.
