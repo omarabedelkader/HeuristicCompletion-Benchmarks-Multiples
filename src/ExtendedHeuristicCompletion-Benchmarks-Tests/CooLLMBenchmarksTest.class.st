@@ -154,7 +154,6 @@ CooLLMBenchmarksTest >> testTargetIsRankedAmongTenRealNames [
 		self assert: (record at: #rank) equals: 10 ].
 	self assert: (benchmark mmrForPrefixSize: 2) closeTo: 0.1.
 	self assert: (benchmark totalEntriesPerPrefixSize: 4) equals: 1.
-	self assert: benchmark skippedRecords isEmpty.
 	self assert: node selector equals: #size.
 	self assert: transport requests size equals: 30
 ]
@@ -170,20 +169,21 @@ CooLLMBenchmarksTest >> testCompleteSamplingWithoutTargetIsMiss [
 ]
 
 { #category : 'tests' }
-CooLLMBenchmarksTest >> testFewerThanTenRealNamesSkipsPrefixAndKeepsRecord [
+CooLLMBenchmarksTest >> testFewerThanTenRealNamesStillScoresPrefix [
 	| benchmark names |
 	"'sin' only continues 'si'; 'siz' and 'size' have nine real names."
 	names := #('sin'), ((self namesFor: 'size') allButLast).
 	benchmark := self benchmarkCompleting: names.
 	benchmark benchCallsite: (self messageIn: 'example ^ self size') atPosition: 0.
-	self assert: (benchmark totalEntriesPerPrefixSize: 2) equals: 1.
-	self assert: (benchmark totalEntriesPerPrefixSize: 3) equals: 0.
-	self assert: (benchmark totalEntriesPerPrefixSize: 4) equals: 0.
-	self assert: benchmark skippedRecords size equals: 2.
-	benchmark skippedRecords do: [ :record |
-		self deny: (record includesKey: #rank).
+	2 to: 4 do: [ :prefix | self assert: (benchmark totalEntriesPerPrefixSize: prefix) equals: 1 ].
+	self assert: (benchmark records collect: [ :record | record at: #complete ]) asArray
+		equals: #(true false false).
+	self assert: (benchmark records collect: [ :record | record at: #rank ]) asArray equals: #(2 1 1).
+	benchmark records allButFirst do: [ :record |
 		self assert: (record at: #candidates) size equals: 9.
 		self assert: (record at: #attempts) size equals: 20 ].
+	self assert: (benchmark mmrForPrefixSize: 2) equals: 1 / 2.
+	self assert: (benchmark mmrForPrefixSize: 3) equals: 1.
 	self assert: transport requests size equals: 10 + 20 + 20
 ]
 

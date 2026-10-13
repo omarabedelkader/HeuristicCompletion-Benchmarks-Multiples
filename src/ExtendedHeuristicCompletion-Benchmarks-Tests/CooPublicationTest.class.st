@@ -13,7 +13,7 @@ CooPublicationTest >> setUp [
 	transport := CooLLMTestTransport new.
 	CooLLMClient default: (CooLLMClient new transport: transport; yourself).
 	"Attempt n answers '' then '2'..'10', so every fixture prefix p samples
-	the ten real names p, p2 .. p10 and no strategy skips a prefix."
+	the ten real names p, p2 .. p10."
 	transport responseBlock: [ :payload |
 		| attempt |
 		attempt := ((payload at: 'options') at: 'seed') - 41.
@@ -50,7 +50,7 @@ CooPublicationTest >> comparison [
 
 { #category : 'tests' }
 CooPublicationTest >> testFourModelsUseSameOneTokenRequestsAndPopulations [
-	"No prefix is skipped here, so LM populations equal the heuristic ones."
+	"Every strategy scores every prefix, so LM populations equal the heuristic ones."
 	| comparison defaultModel |
 	defaultModel := CooLLMClient default model.
 	comparison := self comparison.

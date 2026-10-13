@@ -3,9 +3,10 @@ Uses the same callsites, prefixes (2..8), exact-match target and MRR accounting
 as the heuristic benchmarks (class references for the variables category).
 Candidates come from CooLLMCandidateSampler: one-token samples, keeping the
 leading name of prefix + token when it is a distinct real class or selector.
-The target's rank among the ten candidates is scored. A prefix that yields
-fewer than ten real names in twenty attempts is skipped, logged and kept in
-records. Validation uses the image vocabulary only, never the target.
+The target's rank among the candidates is scored. A prefix that yields fewer
+than ten real names in twenty attempts is scored on the names it did yield, so
+every strategy measures the same callsites and prefixes. Validation uses the
+image vocabulary only, never the target.
 "
 Class {
 	#name : 'CooLLMBenchmarks',
@@ -15,19 +16,6 @@ Class {
 	#package : 'ExtendedHeuristicCompletion-Benchmarks',
 	#tag : 'LLM'
 }
-
-{ #category : 'logging' }
-CooLLMBenchmarks class >> logSkipped: record by: benchmarkName [
-	"Skipped prefixes are not scored, so say so where the run is watched."
-	Transcript crShow: (String streamContents: [ :out |
-		out nextPutAll: benchmarkName; nextPutAll: ': skipped prefix ';
-			print: ((record at: #snapshot) at: #prefix);
-			nextPutAll: ' of '; print: (record at: #expected);
-			nextPutAll: ' ('; print: (record at: #candidates) size;
-			nextPutAll: ' of '; print: CooLLMCandidateSampler candidateCount;
-			nextPutAll: ' real names in '; print: (record at: #attempts) size;
-			nextPutAll: ' attempts)' ])
-]
 
 { #category : 'initialization' }
 CooLLMBenchmarks >> initialize [
@@ -66,11 +54,6 @@ CooLLMBenchmarks >> sampler: aSampler [
 	sampler := aSampler
 ]
 
-{ #category : 'diagnostics' }
-CooLLMBenchmarks >> skippedRecords [
-	^ records select: [ :record | record at: #skipped ifAbsent: [ false ] ]
-]
-
 { #category : 'running' }
 CooLLMBenchmarks >> run [
 	scope methodsDo: [ :method |
@@ -101,17 +84,13 @@ CooLLMBenchmarks >> benchCallsite: node atPosition: ignoredPosition [
 			error pass ].
 		record at: #request put: (sample at: #request);
 			at: #attempts put: (sample at: #attempts);
-			at: #candidates put: (sample at: #candidates).
-		(sample at: #complete)
-			ifFalse: [
-				record at: #skipped put: true.
-				self class logSkipped: record by: name ]
-			ifTrue: [
-				rank := (sample at: #candidates) indexOf: target.
-				record at: #rank put: rank.
-				self trackCompletionResultsFor: target atIndex: rank withPrefix: prefix.
-				self logMemoryUsageSince: startMemory forPrefixSize: size.
-				self logExecutionTimeSince: startTime forPrefixSize: size ] ]
+			at: #candidates put: (sample at: #candidates);
+			at: #complete put: (sample at: #complete).
+		rank := (sample at: #candidates) indexOf: target.
+		record at: #rank put: rank.
+		self trackCompletionResultsFor: target atIndex: rank withPrefix: prefix.
+		self logMemoryUsageSince: startMemory forPrefixSize: size.
+		self logExecutionTimeSince: startTime forPrefixSize: size ]
 ]
 
 { #category : 'exporting' }

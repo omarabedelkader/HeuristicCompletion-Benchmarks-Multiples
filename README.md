@@ -133,7 +133,7 @@ For every callsite and prefix, `CooLLMContextSnapshot` captures class name, supe
 
 Each audit record retains the snapshot, exact rendered prompt, model/options/template, raw response and token counts, candidate, expected answer and rank. The expected answer and method identity are audit metadata only, not prompt inputs. Records are retained in memory; long runs can consume substantial memory.
 
-**One model token is not necessarily one complete Smalltalk name.** A token can contain only a subword, or whitespace/punctuation. The only candidate is `typedPrefix , generatedText`. It scores rank 1 only if it exactly matches the entire original selector/name; otherwise rank 0. There is no trimming, word extraction, resampling or hidden completion of the generated fragment. Consequently the LLM's MRR equals exact-match accuracy, while the heuristics can score at ranks 1–10.
+**One model token is not necessarily one complete Smalltalk name.** A token can contain only a subword, or whitespace/punctuation. `CooLLMCandidateSampler` therefore samples one token up to twenty times (temperature 0.8, seeds 42, 43, ...) and keeps the leading name of `typedPrefix , generatedText` only when it is a distinct real class or selector of the image, until it has ten. The target's rank in that list, in generation order, is scored; rank 0 if it is absent. A prefix that yields fewer than ten real names is scored on the names it did yield, never skipped, so the LLMs, the hybrids and the heuristics all measure the same callsites and prefixes.
 
 Evaluation population:
 
@@ -406,11 +406,11 @@ real corpus experiment described above.
 
 ### Shared package holdout: normal benchmarks and re-ranking
 
-Load the `neural-ranking` branch as usual:
+Load the `main` branch as usual:
 
 ```smalltalk
 Metacello new
-  githubUser: 'omarabedelkader' project: 'HeuristicCompletion-Benchmarks-Multiples' commitish: 'neural-ranking' path: 'src';
+  githubUser: 'omarabedelkader' project: 'HeuristicCompletion-Benchmarks-Multiples' commitish: 'main' path: 'src';
   baseline: 'ExtendedHeuristicCompletionBenchmarks';
   load.
 ```
@@ -508,7 +508,7 @@ Both scripts share `experiment/split.json`, the image, and a frozen source
 snapshot. Choose a new `EXPERIMENT_DIR` for a new selection. The normal models
 must already be available in Ollama; the re-ranker service is managed by its
 pipeline. These scripts use the local benchmark checkout when present, otherwise
-the GitHub `neural-ranking` branch (which must contain these changes).
+the GitHub `main` branch (which must contain these changes).
 
 The older `randomPackages:` and `randomPackagesForReranker:` methods remain
 available for independent exploratory runs. Each makes a fresh selection: do
