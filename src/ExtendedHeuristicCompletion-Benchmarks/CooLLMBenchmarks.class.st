@@ -8,11 +8,15 @@ that list is scored, 0 when it is absent. A prefix with fewer than ten
 reachable names is scored on the names found, so every strategy measures the
 same callsites and prefixes. Validation uses the image vocabulary only, never
 the target.
+
+With validating: false the completer answers what the model generates without
+checking it against the image. Either way the benchmark counts, per prefix
+size, the candidates answered and how many of them are real names.
 "
 Class {
 	#name : 'CooLLMBenchmarks',
 	#superclass : 'CooStaticBenchmarksMessage',
-	#instVars : [ 'client', 'kind', 'records', 'completer' ],
+	#instVars : [ 'client', 'kind', 'records', 'completer', 'validating', 'generated', 'valid' ],
 	#category : 'ExtendedHeuristicCompletion-Benchmarks-LLM',
 	#package : 'ExtendedHeuristicCompletion-Benchmarks',
 	#tag : 'LLM'
@@ -24,6 +28,9 @@ CooLLMBenchmarks >> initialize [
 	name := 'LLM (beam search)'.
 	client := CooLLMClient default copy.
 	kind := #messages.
+	validating := true.
+	generated := Dictionary new.
+	valid := Dictionary new.
 	records := OrderedCollection new
 ]
 
@@ -41,13 +48,33 @@ CooLLMBenchmarks >> kind: aSymbol [
 ]
 
 { #category : 'accessing' }
+CooLLMBenchmarks >> validating: aBoolean [
+	validating := aBoolean.
+	name := aBoolean ifTrue: [ 'LLM (beam search)' ] ifFalse: [ 'LLM (beam search, not validated)' ].
+	completer := nil
+]
+
+{ #category : 'metrics' }
+CooLLMBenchmarks >> generatedForPrefixSize: size [
+	"Candidates the completer answered."
+	^ generated at: size ifAbsent: [ 0 ]
+]
+
+{ #category : 'metrics' }
+CooLLMBenchmarks >> validForPrefixSize: size [
+	"Answered candidates that are real names of the image."
+	^ valid at: size ifAbsent: [ 0 ]
+]
+
+{ #category : 'accessing' }
 CooLLMBenchmarks >> records [
 	^ records
 ]
 
 { #category : 'accessing' }
 CooLLMBenchmarks >> completer [
-	^ completer ifNil: [ completer := CooLLMBeamCompleter new client: client; kind: kind; yourself ]
+	^ completer ifNil: [ completer := CooLLMBeamCompleter new
+		client: client; kind: kind; validating: validating; yourself ]
 ]
 
 { #category : 'accessing' }
@@ -83,8 +110,10 @@ CooLLMBenchmarks >> benchCallsite: node atPosition: ignoredPosition [
 		completion := [ self completer candidatesFor: snapshot ] on: Error do: [ :error |
 			record at: #error put: error messageText.
 			error pass ].
-		#(request candidates scores requests steps complete) do: [ :key |
+		#(request candidates scores valid requests steps complete) do: [ :key |
 			record at: key put: (completion at: key) ].
+		generated at: size put: (self generatedForPrefixSize: size) + (completion at: #candidates) size.
+		valid at: size put: (self validForPrefixSize: size) + (completion at: #valid).
 		rank := (completion at: #candidates) indexOf: target.
 		record at: #rank put: rank.
 		self trackCompletionResultsFor: target atIndex: rank withPrefix: prefix.

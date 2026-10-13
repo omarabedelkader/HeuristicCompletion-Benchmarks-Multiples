@@ -16,11 +16,16 @@ never lose to its own extension (at: against at:put:).
 The search stops when no beam is left, after maxSteps, or when ten candidates
 are found and no beam can still beat the tenth. Fewer than ten real names may
 be reachable. The vocabulary is the whole image; the target is never consulted.
+
+With validating: false the image is not consulted during the search: any text
+made of name characters is followed and answered, real name or not. #valid then
+counts the answered candidates that are real names (all of them when
+validating).
 "
 Class {
 	#name : 'CooLLMBeamCompleter',
 	#superclass : 'Object',
-	#instVars : [ 'client', 'kind', 'beamWidth', 'topTokens', 'maxSteps', 'candidateCount', 'vocabulary' ],
+	#instVars : [ 'client', 'kind', 'beamWidth', 'topTokens', 'maxSteps', 'candidateCount', 'vocabulary', 'validating' ],
 	#classInstVars : [ 'vocabularyOverride' ],
 	#category : 'ExtendedHeuristicCompletion-Benchmarks-LLM',
 	#package : 'ExtendedHeuristicCompletion-Benchmarks',
@@ -53,7 +58,8 @@ CooLLMBeamCompleter >> initialize [
 	beamWidth := 10.
 	topTokens := 20.
 	maxSteps := 12.
-	candidateCount := 10
+	candidateCount := 10.
+	validating := true
 ]
 
 { #category : 'accessing' }
@@ -81,6 +87,12 @@ CooLLMBeamCompleter >> topTokens: anInteger [
 { #category : 'accessing' }
 CooLLMBeamCompleter >> maxSteps: anInteger [
 	maxSteps := anInteger
+]
+
+{ #category : 'accessing' }
+CooLLMBeamCompleter >> validating: aBoolean [
+	"false: answer what the model generates, without checking it against the image."
+	validating := aBoolean
 ]
 
 { #category : 'accessing' }
@@ -137,13 +149,15 @@ CooLLMBeamCompleter >> strongest: count of: probabilities [
 { #category : 'completing' }
 CooLLMBeamCompleter >> candidatesFor: snapshot [
 	"Answer #candidates (most probable first), #scores (name -> log-probability),
-	#requests (the text appended for each request), #steps and #complete.
+	#valid (how many candidates are real names), #requests (the text appended
+	for each request), #steps and #complete.
 	Errors propagate: a failed request is not a miss."
-	| prefix pools beams finished requests steps ranked |
+	| prefix real pools beams finished requests steps ranked |
 	prefix := snapshot at: #prefix.
+	real := (self namesStartingWith: prefix) collect: [ :each | each allButFirst: prefix size ].
 	pools := Dictionary new.
-	pools at: '' put: ((self namesStartingWith: prefix) collect: [ :each | each allButFirst: prefix size ]).
-	beams := (pools at: '') ifEmpty: [ #() ] ifNotEmpty: [ { '' -> 1.0 } ].
+	pools at: '' put: real.
+	beams := (validating and: [ real isEmpty ]) ifTrue: [ #() ] ifFalse: [ { '' -> 1.0 } ].
 	finished := Dictionary new.
 	requests := OrderedCollection new.
 	steps := 0.
@@ -154,7 +168,7 @@ CooLLMBeamCompleter >> candidatesFor: snapshot [
 		nextPools := Dictionary new.
 		beams do: [ :beam |
 			| pool |
-			pool := pools at: beam key.
+			pool := validating ifTrue: [ pools at: beam key ] ifFalse: [ #() ].
 			requests add: beam key.
 			((client topTokensFor: snapshot continuation: beam key count: topTokens) at: #tokens) do: [ :token |
 				| probability name text |
@@ -164,12 +178,12 @@ CooLLMBeamCompleter >> candidatesFor: snapshot [
 				probability > 0 ifTrue: [
 					(token key isEmpty or: [ name size < token key size ])
 						ifTrue: [ "The name ends inside this token."
-							(pool includes: text) ifTrue: [
+							(validating not or: [ pool includes: text ]) ifTrue: [
 								finished at: text put: (finished at: text ifAbsent: [ 0 ]) + probability ] ]
 						ifFalse: [
 							| continuing |
 							continuing := pool select: [ :each | each beginsWith: text ].
-							continuing ifNotEmpty: [
+							(validating not or: [ continuing notEmpty ]) ifTrue: [
 								expansions at: text put: (expansions at: text ifAbsent: [ 0 ]) + probability.
 								nextPools at: text put: continuing ] ] ] ] ].
 		"A longer text is never more probable: drop beams that cannot reach the ten."
@@ -179,7 +193,9 @@ CooLLMBeamCompleter >> candidatesFor: snapshot [
 		beams := (self strongest: beamWidth of: expansions) select: [ :each | each value > tenth ].
 		pools := nextPools ].
 	ranked := self strongest: candidateCount of: finished.
+	real := real asSet.
 	^ Dictionary new
+		at: #valid put: (ranked count: [ :each | real includes: each key ]);
 		at: #request put: (client payloadFor: snapshot);
 		at: #candidates put: (ranked collect: [ :each | prefix , each key ]);
 		at: #scores put: (ranked collect: [ :each | prefix , each key -> each value ln ]) asDictionary;

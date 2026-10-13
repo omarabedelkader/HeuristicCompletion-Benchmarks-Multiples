@@ -412,6 +412,26 @@ CooBenchRunnerVariables >> llm7B [
 	^ self llmCompletionFor: #variables model: (CooBenchRunner llmModels at: #llm7B)
 ]
 
+{ #category : 'LLM' }
+CooBenchRunnerVariables >> llmUnvalidated05B [
+	^ self llmCompletionFor: #variables model: (CooBenchRunner llmModels at: #llm05B) validating: false
+]
+
+{ #category : 'LLM' }
+CooBenchRunnerVariables >> llmUnvalidated15B [
+	^ self llmCompletionFor: #variables model: (CooBenchRunner llmModels at: #llm15B) validating: false
+]
+
+{ #category : 'LLM' }
+CooBenchRunnerVariables >> llmUnvalidated3B [
+	^ self llmCompletionFor: #variables model: (CooBenchRunner llmModels at: #llm3B) validating: false
+]
+
+{ #category : 'LLM' }
+CooBenchRunnerVariables >> llmUnvalidated7B [
+	^ self llmCompletionFor: #variables model: (CooBenchRunner llmModels at: #llm7B) validating: false
+]
+
 { #category : 'Hybrid' }
 CooBenchRunnerVariables >> hybrid05B [
 	^ self hybridCompletionFor: #variables

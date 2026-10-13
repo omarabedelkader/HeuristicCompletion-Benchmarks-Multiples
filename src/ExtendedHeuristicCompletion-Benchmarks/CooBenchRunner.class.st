@@ -289,11 +289,18 @@ CooBenchRunner >> llmCompletionFor: kind [
 
 { #category : 'LLM' }
 CooBenchRunner >> llmCompletionFor: kind model: modelName [
+	^ self llmCompletionFor: kind model: modelName validating: true
+]
+
+{ #category : 'LLM' }
+CooBenchRunner >> llmCompletionFor: kind model: modelName validating: aBoolean [
+	"validating false: candidates are what the model generates, real names or not."
 	| benchmark client |
 	client := CooLLMClient default copy model: modelName; yourself.
 	benchmark := CooLLMBenchmarks new
 		client: client;
 		kind: kind;
+		validating: aBoolean;
 		scope: (CoBenchmarkPackage on: package);
 		yourself.
 	"Keep partial diagnostics under the strategy that actually failed."

@@ -309,6 +309,26 @@ CooBenchRunnerMessage >> llm7B [
 	^ self llmCompletionFor: #messages model: (CooBenchRunner llmModels at: #llm7B)
 ]
 
+{ #category : 'LLM' }
+CooBenchRunnerMessage >> llmUnvalidated05B [
+	^ self llmCompletionFor: #messages model: (CooBenchRunner llmModels at: #llm05B) validating: false
+]
+
+{ #category : 'LLM' }
+CooBenchRunnerMessage >> llmUnvalidated15B [
+	^ self llmCompletionFor: #messages model: (CooBenchRunner llmModels at: #llm15B) validating: false
+]
+
+{ #category : 'LLM' }
+CooBenchRunnerMessage >> llmUnvalidated3B [
+	^ self llmCompletionFor: #messages model: (CooBenchRunner llmModels at: #llm3B) validating: false
+]
+
+{ #category : 'LLM' }
+CooBenchRunnerMessage >> llmUnvalidated7B [
+	^ self llmCompletionFor: #messages model: (CooBenchRunner llmModels at: #llm7B) validating: false
+]
+
 { #category : 'Hybrid' }
 CooBenchRunnerMessage >> hybrid05B [
 	^ self hybridCompletionFor: #messages

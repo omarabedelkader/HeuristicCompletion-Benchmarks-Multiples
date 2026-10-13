@@ -65,6 +65,40 @@ CooLLMBeamCompleterTest >> testOnlyRealNamesAreFollowedOrAnswered [
 ]
 
 { #category : 'tests' }
+CooLLMBeamCompleterTest >> testWithoutValidationAnswersWhatTheModelGenerates [
+	"sizzle is not a name of the image: it is followed, answered and counted as not valid."
+	| table result |
+	table := {
+		'' -> { 'zz' -> -0.1. 'ze' -> -2.0 }.
+		'zz' -> { 'le' -> -0.1 }.
+		'zzle' -> { ' ' -> -0.1 }.
+		'ze' -> { ' ' -> -0.1 } }.
+	completer validating: false.
+	result := self complete: 'si' among: #('size') tokens: table.
+	self assert: (result at: #candidates) equals: #('sizzle' 'size').
+	self assert: (result at: #valid) equals: 1.
+	self assert: ((result at: #scores) at: 'sizzle') closeTo: -0.3.
+	completer validating: true.
+	result := self complete: 'si' among: #('size') tokens: table.
+	self assert: (result at: #candidates) equals: #('size').
+	self assert: (result at: #valid) equals: 1
+]
+
+{ #category : 'tests' }
+CooLLMBeamCompleterTest >> testWithoutValidationNeedsNoRealNameToStart [
+	| result |
+	completer validating: false.
+	result := self complete: 'zq' among: #('size') tokens: {
+		'' -> { 'x' -> -0.5. ' ' -> -1.0 }.
+		'x' -> { '.' -> -0.1 } }.
+	self assert: (result at: #candidates) equals: #('zqx' 'zq').
+	self assert: (result at: #valid) equals: 0.
+	completer validating: true.
+	self assert: ((self complete: 'zq' among: #('size') tokens: #()) at: #candidates) isEmpty.
+	self assert: transport requests size equals: 2
+]
+
+{ #category : 'tests' }
 CooLLMBeamCompleterTest >> testEndOfNameFactorLetsAnExtensionWin [
 	| result |
 	result := self complete: 'at' among: #('at:' 'at:put:') tokens: {
